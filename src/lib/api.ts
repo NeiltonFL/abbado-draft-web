@@ -49,6 +49,12 @@ class ApiClient {
   createWorkflow(data: any) { return this.request<any>("/api/workflows", { method: "POST", body: JSON.stringify(data) }); }
   updateWorkflow(id: string, data: any) { return this.request<any>(`/api/workflows/${id}`, { method: "PUT", body: JSON.stringify(data) }); }
   getInterview(workflowId: string) { return this.request<any>(`/api/workflows/${workflowId}/interview`); }
+  addTemplateToWorkflow(workflowId: string, templateId: string, displayOrder: number) {
+    return this.request<any>(`/api/workflows/${workflowId}/templates`, { method: "POST", body: JSON.stringify({ templateId, displayOrder }) });
+  }
+  removeTemplateFromWorkflow(workflowId: string, wtId: string) {
+    return this.request<any>(`/api/workflows/${workflowId}/templates/${wtId}`, { method: "DELETE" });
+  }
   updateVariables(workflowId: string, variables: any[]) {
     return this.request<any>(`/api/workflows/${workflowId}/variables`, { method: "PUT", body: JSON.stringify({ variables }) });
   }
