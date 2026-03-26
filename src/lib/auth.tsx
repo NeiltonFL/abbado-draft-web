@@ -11,12 +11,13 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (email: string, password: string, name: string) => Promise<{ error?: string }>;
+  register: (email: string, password: string, name: string, orgName: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null, session: null, loading: true,
-  signIn: async () => ({}), signUp: async () => ({}), signOut: async () => {},
+  signIn: async () => ({}), signUp: async () => ({}), register: async () => ({}), signOut: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -43,7 +44,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return error ? { error: error.message } : {};
+    if (error) return { error: error.message };
+    // Sync user record with API
+    try { await api.syncUser(); } catch {}
+    return {};
   };
 
   const signUp = async (email: string, password: string, name: string) => {
@@ -54,13 +58,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return error ? { error: error.message } : {};
   };
 
+  const register = async (email: string, password: string, name: string, orgName: string) => {
+    try {
+      // Call our API to create org + user + Supabase Auth account
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/auth/register`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, name, orgName }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) return { error: data.error };
+
+      // Now sign in
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInErr) return { error: signInErr.message };
+
+      return {};
+    } catch (err: any) {
+      return { error: err.message };
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     api.setToken(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, register, signOut }}>
       {children}
     </AuthContext.Provider>
   );

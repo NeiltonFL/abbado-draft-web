@@ -27,6 +27,10 @@ class ApiClient {
     return res.json();
   }
 
+  // ── Auth ──
+  syncUser() { return this.request<any>("/api/auth/sync", { method: "POST" }); }
+  getMe() { return this.request<any>("/api/auth/me"); }
+
   // ── Templates ──
   getTemplates(params?: { format?: string; search?: string }) {
     const qs = new URLSearchParams(params as any).toString();
