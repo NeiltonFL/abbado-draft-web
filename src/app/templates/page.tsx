@@ -3,8 +3,10 @@
 import { useEffect, useState, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 export default function TemplatesPage() {
+  const { session, loading: authLoading } = useAuth();
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -12,8 +14,9 @@ export default function TemplatesPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (authLoading || !session) return;
     api.getTemplates().then(setTemplates).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  }, [authLoading, session]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

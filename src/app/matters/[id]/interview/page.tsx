@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useRouter, useParams } from "next/navigation";
 import { AddressInput } from "@/components/AddressInput";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -29,6 +30,7 @@ export default function InterviewPage() {
   const params = useParams();
   const router = useRouter();
   const matterId = params.id as string;
+  const { session, loading: authLoading } = useAuth();
 
   const [matter, setMatter] = useState<any>(null);
   const [interview, setInterview] = useState<{ workflowName?: string; sections: InterviewSection[] } | null>(null);
@@ -42,6 +44,7 @@ export default function InterviewPage() {
   const [editingSection, setEditingSection] = useState<number | null>(null);
 
   useEffect(() => {
+    if (authLoading || !session) return;
     api.getMatter(matterId).then((m) => {
       setMatter(m);
       setValues((m.variableValues as Record<string, any>) || {});
@@ -49,7 +52,7 @@ export default function InterviewPage() {
       return api.getInterview(m.workflowId);
     }).then((iv) => { setInterview(iv); setLoading(false); })
       .catch((err) => { setError(err.message); setLoading(false); });
-  }, [matterId]);
+  }, [matterId, authLoading, session]);
 
   const setValue = (name: string, value: any) => setValues((prev) => ({ ...prev, [name]: value }));
   const isVisible = (condition: string | null): boolean => { if (!condition) return true; return evalConditionData(condition, values); };

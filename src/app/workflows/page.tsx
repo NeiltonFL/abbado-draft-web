@@ -3,15 +3,18 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 
 export default function WorkflowsPage() {
+  const { session, loading: authLoading } = useAuth();
   const [workflows, setWorkflows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading || !session) return;
     api.getWorkflows().then(setWorkflows).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  }, [authLoading, session]);
 
   const seedDemo = async () => {
     try {

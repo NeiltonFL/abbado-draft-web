@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -10,6 +11,7 @@ export default function MatterDetailPage() {
   const params = useParams();
   const router = useRouter();
   const matterId = params.id as string;
+  const { session, loading: authLoading } = useAuth();
 
   const [matter, setMatter] = useState<any>(null);
   const [activity, setActivity] = useState<any[]>([]);
@@ -22,7 +24,7 @@ export default function MatterDetailPage() {
     setMatter(m); setActivity(a);
   };
 
-  useEffect(() => { reload().then(() => setLoading(false)).catch(() => setLoading(false)); }, [matterId]);
+  useEffect(() => { if (authLoading || !session) return; reload().then(() => setLoading(false)).catch(() => setLoading(false)); }, [matterId, authLoading, session]);
 
   const handleDownload = async (docId: string) => {
     try { const { url, fileName } = await api.getDownloadUrl(docId); const a = document.createElement("a"); a.href = url; a.download = fileName; a.click(); }

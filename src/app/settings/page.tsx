@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const [tab, setTab] = useState<"users" | "adapters" | "org">("users");
   const [users, setUsers] = useState<any[]>([]);
   const [adapters, setAdapters] = useState<any[]>([]);
@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [showInvite, setShowInvite] = useState(false);
 
   useEffect(() => {
+    if (authLoading || !session) return;
     Promise.all([
       api.getUsers().catch(() => []),
       api.getAdapters().catch(() => []),
@@ -22,7 +23,7 @@ export default function SettingsPage() {
       setAdapters(a);
       setLoading(false);
     });
-  }, []);
+  }, [authLoading, session]);
 
   return (
     <AppShell>

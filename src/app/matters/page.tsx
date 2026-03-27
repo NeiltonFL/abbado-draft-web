@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export default function MattersPage() {
+  const { session, loading: authLoading } = useAuth();
   const [matters, setMatters] = useState<any>(null);
   const [workflows, setWorkflows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -14,6 +16,7 @@ export default function MattersPage() {
   const router = useRouter();
 
   useEffect(() => {
+    if (authLoading || !session) return;
     Promise.all([
       api.getMatters().catch(() => ({ data: [], total: 0 })),
       api.getWorkflows().catch(() => []),
@@ -22,7 +25,7 @@ export default function MattersPage() {
       setWorkflows(w);
       setLoading(false);
     });
-  }, []);
+  }, [authLoading, session]);
 
   return (
     <AppShell>

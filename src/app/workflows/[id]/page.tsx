@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AddressInput } from "@/components/AddressInput";
@@ -68,6 +69,7 @@ const QUESTION_TYPES = [
 export default function WorkflowBuilderPage() {
   const params = useParams();
   const workflowId = params.id as string;
+  const { session, loading: authLoading } = useAuth();
   const [workflow, setWorkflow] = useState<any>(null);
   const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +82,7 @@ export default function WorkflowBuilderPage() {
     setAllTemplates(t);
   }, [workflowId]);
 
-  useEffect(() => { reload().catch(console.error).finally(() => setLoading(false)); }, [reload]);
+  useEffect(() => { if (authLoading || !session) return; reload().catch(console.error).finally(() => setLoading(false)); }, [reload, authLoading, session]);
 
   if (loading) return <AppShell><div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading...</p></div></AppShell>;
   if (!workflow) return <AppShell><p className="text-gray-500">Workflow not found</p></AppShell>;

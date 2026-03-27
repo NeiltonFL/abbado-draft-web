@@ -3,15 +3,18 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 
 export default function DashboardPage() {
+  const { session, loading: authLoading } = useAuth();
   const [matters, setMatters] = useState<any>(null);
   const [workflows, setWorkflows] = useState<any[]>([]);
   const [activity, setActivity] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading || !session) return;
     Promise.all([
       api.getMatters({ }).catch(() => ({ data: [], total: 0 })),
       api.getWorkflows().catch(() => []),
@@ -22,7 +25,7 @@ export default function DashboardPage() {
       setActivity(a);
       setLoading(false);
     });
-  }, []);
+  }, [authLoading, session]);
 
   return (
     <AppShell>
