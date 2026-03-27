@@ -46,43 +46,52 @@ export default function TaskPane() {
   const [docMetadata, setDocMetadata] = useState<any>(null);
   const [error, setError] = useState("");
 
-  // Initialize Office.js — dynamically load script, then call onReady
+  // Initialize Office.js
   useEffect(() => {
     let cancelled = false;
 
-    // Inject Office.js script tag if not already present
+    // In Word for the Web, Office.js is often pre-injected into the iframe
+    // Try immediately first, then fall back to loading the script
+    if (typeof Office !== "undefined" && Office.onReady) {
+      console.log("[Abbado] Office already available, calling onReady");
+      Office.onReady((info: any) => {
+        if (cancelled) return;
+        console.log("[Abbado] Office.onReady result:", JSON.stringify(info));
+        setOfficeReady(true);
+        setMode("template");
+      });
+      // Safety: if onReady doesn't fire within 3s, proceed anyway
+      setTimeout(() => { if (cancelled) return; if (mode === "loading") { console.log("[Abbado] onReady timeout, forcing template mode"); setMode("template"); setOfficeReady(true); } }, 3000);
+      return () => { cancelled = true; };
+    }
+
+    // Office.js not pre-injected — load it dynamically
+    console.log("[Abbado] Office not found, loading script dynamically");
     if (!document.querySelector('script[src*="office.js"]')) {
       const script = document.createElement("script");
       script.src = "https://appsforoffice.microsoft.com/lib/1/hosted/office.js";
-      script.onload = () => { if (!cancelled) initOffice(); };
-      script.onerror = () => { if (!cancelled) setMode("standalone"); };
-      document.head.appendChild(script);
-    } else {
-      initOffice();
-    }
-
-    function initOffice() {
-      let attempts = 0;
-      const poll = () => {
+      script.onload = () => {
+        console.log("[Abbado] Script loaded, calling onReady");
         if (cancelled) return;
-        attempts++;
         if (typeof Office !== "undefined" && Office.onReady) {
           Office.onReady((info: any) => {
             if (cancelled) return;
-            console.log("Office.onReady:", info);
+            console.log("[Abbado] Office.onReady result:", JSON.stringify(info));
             setOfficeReady(true);
-            setMode("template"); // Default to template mode
+            setMode("template");
           });
-        } else if (attempts < 30) {
-          setTimeout(poll, 100);
         } else {
           setMode("standalone");
         }
       };
-      poll();
+      script.onerror = () => { if (!cancelled) setMode("standalone"); };
+      document.head.appendChild(script);
     }
 
-    return () => { cancelled = true; };
+    // Fallback: if nothing works in 5s, go standalone
+    const fallback = setTimeout(() => { if (!cancelled && mode === "loading") setMode("standalone"); }, 5000);
+
+    return () => { cancelled = true; clearTimeout(fallback); };
   }, []);
 
   // Detect if this is a template or generated document
@@ -296,10 +305,14 @@ export default function TaskPane() {
 
   if (mode === "loading") {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="h-screen flex items-center justify-center p-4">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm text-gray-500">Connecting to Word...</p>
+          <p className="text-[10px] text-gray-300 mt-2">Office: {typeof Office !== "undefined" ? "loaded" : "not loaded"}</p>
+          <button onClick={() => setMode("template")} className="mt-4 px-3 py-1.5 text-xs bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
+            Skip — open in Template Mode
+          </button>
         </div>
       </div>
     );
