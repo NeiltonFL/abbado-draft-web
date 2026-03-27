@@ -46,24 +46,43 @@ export default function TaskPane() {
   const [docMetadata, setDocMetadata] = useState<any>(null);
   const [error, setError] = useState("");
 
-  // Initialize Office.js
+  // Initialize Office.js — dynamically load script, then call onReady
   useEffect(() => {
-    if (isOfficeReady()) {
-      Office.onReady((info: any) => {
-        if (info.host === Office.HostType.Word) {
-          setOfficeReady(true);
-          detectMode();
+    let cancelled = false;
+
+    // Inject Office.js script tag if not already present
+    if (!document.querySelector('script[src*="office.js"]')) {
+      const script = document.createElement("script");
+      script.src = "https://appsforoffice.microsoft.com/lib/1/hosted/office.js";
+      script.onload = () => { if (!cancelled) initOffice(); };
+      script.onerror = () => { if (!cancelled) setMode("standalone"); };
+      document.head.appendChild(script);
+    } else {
+      initOffice();
+    }
+
+    function initOffice() {
+      let attempts = 0;
+      const poll = () => {
+        if (cancelled) return;
+        attempts++;
+        if (typeof Office !== "undefined" && Office.onReady) {
+          Office.onReady((info: any) => {
+            if (cancelled) return;
+            console.log("Office.onReady:", info);
+            setOfficeReady(true);
+            setMode("template"); // Default to template mode
+          });
+        } else if (attempts < 30) {
+          setTimeout(poll, 100);
         } else {
           setMode("standalone");
         }
-      });
-    } else {
-      // Not in Word — show standalone mode for testing
-      const timer = setTimeout(() => {
-        if (!isOfficeReady()) setMode("standalone");
-      }, 2000);
-      return () => clearTimeout(timer);
+      };
+      poll();
     }
+
+    return () => { cancelled = true; };
   }, []);
 
   // Detect if this is a template or generated document
