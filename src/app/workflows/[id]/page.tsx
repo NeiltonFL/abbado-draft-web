@@ -1277,64 +1277,136 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
 function PreviewTab({ pages, questions }: { pages: Page[]; questions: Question[] }) {
   const [currentPage, setCurrentPage] = useState(0);
 
+  // Parse page description (might be JSON with section metadata)
+  const getPageText = (p: Page): string => {
+    if (!p.description) return "";
+    if (p.description.startsWith("{")) {
+      try { return JSON.parse(p.description).text || ""; } catch {}
+    }
+    return p.description;
+  };
+
   if (pages.length === 0) {
     return <Empty title="Nothing to preview" desc="Add pages and questions first, then preview the interview experience here." action="Go to Questions tab" onAction={() => {}} />;
   }
 
   const page = pages[currentPage];
-  const pageQs = questions.filter(q => q.groupName === page?.name && !q.isComputed && q.type !== "info");
+  const pageText = getPageText(page);
+  // Filter: only top-level questions (not sub-questions with .$ in name), exclude computed
+  const pageQs = questions.filter(q => q.groupName === page?.name && !q.isComputed && q.type !== "info" && !q.name.includes(".$." ));
   const infoBlocks = questions.filter(q => q.groupName === page?.name && q.type === "info");
+  // Sub-questions grouped by parent
+  const subQsByParent: Record<string, Question[]> = {};
+  for (const q of questions) {
+    const match = q.name.match(/^(.+)\.\$\.(.+)$/);
+    if (match && q.groupName === page?.name) {
+      if (!subQsByParent[match[1]]) subQsByParent[match[1]] = [];
+      subQsByParent[match[1]].push(q);
+    }
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-medium text-gray-700">Interview Preview</h2>
-          <p className="text-xs text-gray-400">This is what the user will see when running this workflow.</p>
+          <p className="text-xs text-gray-400">This is what the end user will see when filling out the interview.</p>
         </div>
       </div>
 
       {/* Progress */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-1 mb-6 px-1">
         {pages.map((p, i) => (
-          <button key={p.id} onClick={() => setCurrentPage(i)} className="flex-1">
-            <div className={`h-1.5 rounded-full ${i <= currentPage ? "bg-brand-500" : "bg-gray-200"}`} />
-            <p className={`text-[10px] mt-1 ${i === currentPage ? "text-brand-700 font-medium" : "text-gray-400"}`}>{p.name}</p>
+          <button key={p.id} onClick={() => setCurrentPage(i)} className="flex-1 group">
+            <div className={`h-1.5 rounded-full transition-all ${i < currentPage ? "bg-brand-500" : i === currentPage ? "bg-brand-500" : "bg-gray-200 group-hover:bg-gray-300"}`} />
+            <p className={`text-[10px] mt-1 truncate ${i === currentPage ? "text-brand-700 font-medium" : "text-gray-400"}`}>{p.name}</p>
           </button>
         ))}
       </div>
 
       {/* Page content */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 max-w-2xl mx-auto">
-        <h3 className="text-lg font-medium text-gray-900">{page?.name}</h3>
-        {page?.description && <p className="text-sm text-gray-500 mt-1">{page.description}</p>}
-        {page?.condition && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded inline-block">Conditional: {page.condition}</p>}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm max-w-2xl mx-auto overflow-hidden">
+        {/* Page header */}
+        <div className="px-8 pt-8 pb-4">
+          <h3 className="text-xl font-semibold text-gray-900">{page?.name}</h3>
+          {pageText && <p className="text-sm text-gray-500 mt-1">{pageText}</p>}
+          {page?.condition && (
+            <p className="text-[10px] text-amber-600 mt-2 bg-amber-50 px-2 py-1 rounded inline-block">
+              ⚡ This page is conditional — only shown when conditions are met
+            </p>
+          )}
+        </div>
 
-        <div className="mt-6 space-y-5">
+        {/* Questions */}
+        <div className="px-8 pb-8 space-y-6">
           {infoBlocks.map(q => (
-            <div key={q.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">{q.defaultValue || "Info block"}</div>
+            <div key={q.id} className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-sm text-blue-800 leading-relaxed">
+              {q.defaultValue || "Information for the user"}
+            </div>
           ))}
+
           {pageQs.map(q => {
-            const t = QUESTION_TYPES.find(qt => qt.value === q.type);
+            const subs = subQsByParent[q.name] || [];
+
             return (
-              <div key={q.id}>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {q.displayLabel} {q.required && <span className="text-red-400">*</span>}
-                  {q.condition && <span className="text-[10px] text-amber-500 ml-1">(conditional)</span>}
+              <div key={q.id} className="space-y-1">
+                <label className="block text-sm font-medium text-gray-800">
+                  {q.displayLabel}
+                  {q.required && <span className="text-red-400 ml-0.5">*</span>}
+                  {q.condition && <span className="text-[10px] text-amber-500 ml-1.5 font-normal">(conditional)</span>}
                 </label>
-                {q.helpText && <p className="text-xs text-gray-400 mb-1.5">{q.helpText}</p>}
-                <PreviewInput type={q.type} validation={q.validation} />
+                {q.helpText && <p className="text-xs text-gray-400 leading-relaxed">{q.helpText}</p>}
+
+                {q.type === "repeating" ? (
+                  <div className="mt-2">
+                    {/* Repeating item preview with sub-questions */}
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
+                        <span className="text-xs font-medium text-gray-600">{q.validation?.itemLabel || "Item"} 1</span>
+                        <span className="text-[10px] text-gray-400">of 1</span>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        {subs.length > 0 ? subs.map(sq => (
+                          <div key={sq.id}>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">
+                              {sq.displayLabel}
+                              {sq.required && <span className="text-red-400 ml-0.5">*</span>}
+                              {sq.condition && <span className="text-[10px] text-amber-500 ml-1">(conditional)</span>}
+                            </label>
+                            <PreviewInput type={sq.type} validation={sq.validation} />
+                          </div>
+                        )) : (
+                          <p className="text-xs text-gray-400 italic">No sub-fields defined yet. Add them in the Questions tab.</p>
+                        )}
+                      </div>
+                    </div>
+                    <button className="mt-2 w-full py-2 border border-dashed border-gray-300 rounded-xl text-sm text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors">
+                      + Add another {q.validation?.itemLabel || "item"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-1">
+                    <PreviewInput type={q.type} validation={q.validation} />
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
 
-        <div className="flex justify-between mt-8">
-          <button disabled={currentPage === 0} onClick={() => setCurrentPage(p => p - 1)} className="px-4 py-2 text-sm text-gray-500 disabled:opacity-30">← Back</button>
+        {/* Navigation */}
+        <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 flex justify-between">
+          <button disabled={currentPage === 0} onClick={() => setCurrentPage(p => p - 1)} className="px-5 py-2 text-sm text-gray-500 hover:text-gray-700 disabled:opacity-30 transition-colors">
+            ← Back
+          </button>
           {currentPage < pages.length - 1 ? (
-            <button onClick={() => setCurrentPage(p => p + 1)} className="px-6 py-2 bg-brand-700 text-white rounded-lg text-sm">Next →</button>
+            <button onClick={() => setCurrentPage(p => p + 1)} className="px-6 py-2.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 transition-colors">
+              Next →
+            </button>
           ) : (
-            <button className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm">Generate documents</button>
+            <button className="px-6 py-2.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors">
+              Generate documents
+            </button>
           )}
         </div>
       </div>
@@ -1343,18 +1415,79 @@ function PreviewTab({ pages, questions }: { pages: Page[]; questions: Question[]
 }
 
 function PreviewInput({ type, validation }: { type: string; validation: any }) {
-  const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50";
+  const ic = "w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white";
   switch (type) {
-    case "boolean": return <div className="flex gap-3"><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">{validation?.trueLabel || "Yes"}</button><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">{validation?.falseLabel || "No"}</button></div>;
-    case "dropdown": case "state": return <select className={ic}><option>Select...</option>{(validation?.options || []).map((o: string) => <option key={o}>{o}</option>)}</select>;
-    case "multi_select": return <div className="flex flex-wrap gap-2">{(validation?.options || ["Option A", "Option B"]).map((o: string) => <label key={o} className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="rounded" />{o}</label>)}</div>;
+    case "boolean":
+      return (
+        <div className="flex gap-2">
+          <button className="flex-1 px-4 py-2.5 rounded-xl text-sm border border-gray-200 hover:border-brand-300 hover:bg-brand-50/30 transition-colors text-gray-600">
+            {validation?.trueLabel || "Yes"}
+          </button>
+          <button className="flex-1 px-4 py-2.5 rounded-xl text-sm border border-gray-200 hover:border-brand-300 hover:bg-brand-50/30 transition-colors text-gray-600">
+            {validation?.falseLabel || "No"}
+          </button>
+        </div>
+      );
+    case "dropdown":
+      return (
+        <select className={ic}>
+          <option>Select...</option>
+          {(validation?.options || []).map((o: string) => <option key={o}>{o}</option>)}
+        </select>
+      );
+    case "state":
+      return <select className={ic}><option>Select state...</option></select>;
+    case "multi_select":
+      const opts = validation?.options || [];
+      return (
+        <div className="space-y-1.5">
+          {opts.map((o: string) => (
+            <label key={o} className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-200 hover:border-brand-300 hover:bg-brand-50/20 transition-colors cursor-pointer">
+              <input type="checkbox" className="rounded border-gray-300 text-brand-600 w-4 h-4" />
+              <span className="text-sm text-gray-700">{o}</span>
+            </label>
+          ))}
+          {validation?.allowOther && (
+            <label className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-dashed border-gray-200 hover:border-brand-300 transition-colors cursor-pointer">
+              <input type="checkbox" className="rounded border-gray-300 w-4 h-4" />
+              <span className="text-sm text-gray-400 italic">Other...</span>
+            </label>
+          )}
+        </div>
+      );
     case "date": return <input type="date" className={ic} />;
-    case "rich_text": return <textarea className={`${ic} h-20`} />;
-    case "repeating": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400"><button className="px-3 py-1 bg-gray-100 rounded text-sm">+ Add {validation?.itemLabel || "item"}</button></div>;
-    case "file_upload": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400">Click or drag to upload</div>;
+    case "rich_text": return <textarea className={`${ic} h-24 resize-y`} placeholder="Type your answer..." />;
+    case "file_upload":
+      return (
+        <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-xl hover:border-brand-400 hover:bg-brand-50/20 cursor-pointer transition-colors">
+          <span className="text-lg">📎</span>
+          <span className="text-xs text-gray-400 mt-1">Click or drag to upload</span>
+          {validation?.acceptedTypes && <span className="text-[10px] text-gray-300 mt-0.5">{validation.acceptedTypes}</span>}
+        </label>
+      );
+    case "repeating":
+      return null; // Handled in PreviewTab directly
     case "phone": return <PhoneInput value={null} onChange={() => {}} />;
     case "address": return <AddressInput value={null} onChange={() => {}} fields={validation?.fields} />;
-    default: return <input type={type === "email" ? "email" : type === "number" || type === "currency" || type === "percent" ? "number" : "text"} className={ic} />;
+    case "currency":
+      return (
+        <div className="relative">
+          <span className="absolute left-3.5 top-2.5 text-gray-400 text-sm">$</span>
+          <input type="number" className={`${ic} pl-7`} placeholder="0.00" />
+        </div>
+      );
+    case "percent":
+      return (
+        <div className="relative">
+          <input type="number" className={`${ic} pr-8`} placeholder="0" />
+          <span className="absolute right-3.5 top-2.5 text-gray-400 text-sm">%</span>
+        </div>
+      );
+    case "email": return <input type="email" className={ic} placeholder="name@example.com" />;
+    case "url": return <input type="url" className={ic} placeholder="https://" />;
+    case "number": return <input type="number" className={ic} placeholder={validation?.min !== undefined ? `Min: ${validation.min}` : "0"} />;
+    default:
+      return <input type="text" className={ic} placeholder={validation?.placeholder || ""} />;
   }
 }
 
