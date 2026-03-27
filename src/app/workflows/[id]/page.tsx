@@ -185,8 +185,6 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
     for (const p of parents) {
       if (subMap[p.name]) {
         p.validation = { ...(p.validation || {}), subQuestions: subMap[p.name] };
-        // Mark as repeating type if it has sub-questions
-        if (p.type === "text" && subMap[p.name].length > 0) p.type = "repeating";
       }
     }
 
