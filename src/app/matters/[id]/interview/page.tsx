@@ -144,7 +144,17 @@ export default function InterviewPage() {
 
   const section = interview.sections[currentSection];
   const isLastSection = isLastVisible;
-  const visibleVars = section?.variables.filter((v) => !v.isComputed && isVisible(v.condition)) || [];
+  // Filter: visible, not computed, not sub-questions (Parent.$.field)
+  const visibleVars = section?.variables.filter((v) => !v.isComputed && isVisible(v.condition) && !v.name.includes(".$.")) || [];
+  // Group sub-questions by parent for repeating items
+  const subsByParent: Record<string, Variable[]> = {};
+  for (const v of section?.variables || []) {
+    const m = v.name.match(/^(.+)\.\$\.(.+)$/);
+    if (m) {
+      if (!subsByParent[m[1]]) subsByParent[m[1]] = [];
+      subsByParent[m[1]].push(v);
+    }
+  }
 
   return (
     <AppShell>
@@ -180,17 +190,72 @@ export default function InterviewPage() {
         {/* Section */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-medium text-gray-900">{section.name}</h2>
-          {section.description && <p className="text-sm text-gray-500 mt-1">{section.description}</p>}
+          {section.description && (() => {
+            let text = section.description;
+            if (text.startsWith("{")) { try { text = JSON.parse(text).text || ""; } catch {} }
+            return text ? <p className="text-sm text-gray-500 mt-1">{text}</p> : null;
+          })()}
 
           <div className="mt-6 space-y-5">
-            {visibleVars.map((v) => (
-              <VariableField
-                key={v.id}
-                variable={v}
-                value={values[v.name]}
-                onChange={(val) => setValue(v.name, val)}
-              />
-            ))}
+            {visibleVars.map((v) => {
+              if (v.type === "repeating") {
+                const subs = subsByParent[v.name] || [];
+                const itemLabel = (v.validation as any)?.itemLabel || "Item";
+                const items: Record<string, any>[] = Array.isArray(values[v.name]) ? values[v.name] : [{}];
+
+                return (
+                  <div key={v.id}>
+                    <label className="block text-sm font-medium text-gray-800 mb-2">{v.displayLabel}</label>
+                    {v.helpText && <p className="text-xs text-gray-400 mb-2">{v.helpText}</p>}
+                    <div className="space-y-3">
+                      {items.map((item, idx) => (
+                        <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden">
+                          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+                            <span className="text-xs font-medium text-gray-600">{itemLabel} {idx + 1}</span>
+                            {items.length > 1 && (
+                              <button type="button" onClick={() => {
+                                const next = items.filter((_, i) => i !== idx);
+                                setValue(v.name, next.length > 0 ? next : [{}]);
+                              }} className="text-[10px] text-red-400 hover:text-red-600">Remove</button>
+                            )}
+                          </div>
+                          <div className="p-4 space-y-4">
+                            {subs.map(sq => {
+                              const field = sq.name.split(".$.")[1];
+                              return (
+                                <VariableField
+                                  key={`${idx}-${sq.id}`}
+                                  variable={sq}
+                                  value={item[field] ?? ""}
+                                  onChange={(val) => {
+                                    const next = [...items];
+                                    next[idx] = { ...next[idx], [field]: val };
+                                    setValue(v.name, next);
+                                  }}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => setValue(v.name, [...items, {}])}
+                        className="w-full py-2.5 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 font-medium hover:border-brand-400 hover:text-brand-600 transition-all">
+                        + Add {itemLabel} {items.length + 1}
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <VariableField
+                  key={v.id}
+                  variable={v}
+                  value={values[v.name]}
+                  onChange={(val) => setValue(v.name, val)}
+                />
+              );
+            })}
 
             {visibleVars.length === 0 && (
               <p className="text-sm text-gray-400 py-4">No fields in this section for the current configuration.</p>
