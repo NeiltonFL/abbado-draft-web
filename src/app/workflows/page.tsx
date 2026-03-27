@@ -58,10 +58,10 @@ export default function WorkflowsPage() {
         ) : (
           <div className="grid grid-cols-2 gap-4">
             {workflows.map((w) => (
-              <div key={w.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:border-brand-300 hover:shadow-sm transition-all group relative">
-                <Link href={`/workflows/${w.id}`} className="block">
+              <div key={w.id} className="bg-white rounded-xl border border-gray-200 hover:border-brand-300 hover:shadow-sm transition-all group">
+                <Link href={`/workflows/${w.id}`} className="block p-5">
                   <div className="flex items-start justify-between">
-                    <div className="min-w-0 pr-8">
+                    <div className="min-w-0 pr-2">
                       <h3 className="text-sm font-medium text-gray-900">{w.name}</h3>
                       {w.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{w.description}</p>}
                     </div>
@@ -75,26 +75,24 @@ export default function WorkflowsPage() {
                     <span>{w._count?.matters || 0} matters</span>
                   </div>
                 </Link>
-                {/* Actions */}
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                  <button onClick={async (e) => {
-                    e.preventDefault(); e.stopPropagation();
+                {/* Actions bar — appears on hover */}
+                <div className="border-t border-gray-100 px-5 py-2 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={async () => {
                     try {
                       await api.duplicateWorkflow(w.id);
                       const wfs = await api.getWorkflows();
                       setWorkflows(wfs);
                     } catch (err: any) { alert("Error: " + err.message); }
-                  }} className="px-2 py-1 text-[10px] bg-gray-100 text-gray-500 rounded hover:bg-brand-50 hover:text-brand-600" title="Duplicate">
+                  }} className="px-2.5 py-1 text-[11px] text-gray-500 hover:text-brand-600 hover:bg-brand-50 rounded transition-colors">
                     Duplicate
                   </button>
-                  <button onClick={async (e) => {
-                    e.preventDefault(); e.stopPropagation();
+                  <button onClick={async () => {
                     if (!confirm(`Delete "${w.name}"? This cannot be undone.`)) return;
                     try {
                       await api.deleteWorkflow(w.id);
                       setWorkflows(prev => prev.filter(x => x.id !== w.id));
                     } catch (err: any) { alert("Error: " + err.message); }
-                  }} className="px-2 py-1 text-[10px] bg-gray-100 text-red-400 rounded hover:bg-red-50 hover:text-red-600" title="Delete">
+                  }} className="px-2.5 py-1 text-[11px] text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors">
                     Delete
                   </button>
                 </div>
