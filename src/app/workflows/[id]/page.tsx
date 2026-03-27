@@ -1408,50 +1408,52 @@ function ConditionalRulesEditor({ cfg, setCfg, questions }: {
     const next = [...rules]; [next[i], next[ni]] = [next[ni], next[i]]; setCfg({ rules: next });
   };
 
-  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
-
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-medium text-gray-600">Conditional Rules</p>
-          <p className="text-[10px] text-gray-400">Rules are evaluated top to bottom. First match wins. Use <code className="bg-gray-100 px-1 rounded">{"{{variable}}"}</code> in output values to include other answers.</p>
-        </div>
+      <div>
+        <p className="text-xs font-medium text-gray-600">Conditional Rules</p>
+        <p className="text-[10px] text-gray-400">First match wins. Each output supports variables, functions, and expressions.</p>
       </div>
 
       {rules.map((rule, i) => (
-        <div key={i} className="rounded-xl border border-gray-200 p-3 space-y-2 group hover:border-brand-200 transition-colors">
-          <div className="flex items-center justify-between">
+        <div key={i} className="rounded-2xl border border-gray-200 overflow-hidden group hover:border-brand-200 transition-colors">
+          {/* Condition header */}
+          <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
             <div className="flex items-center gap-2">
               <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100">
-                <button type="button" onClick={() => moveRule(i, -1)} className="text-[9px] text-gray-400">▲</button>
-                <button type="button" onClick={() => moveRule(i, 1)} className="text-[9px] text-gray-400">▼</button>
+                <button type="button" onClick={() => moveRule(i, -1)} className="text-[9px] text-gray-400 hover:text-gray-600">▲</button>
+                <button type="button" onClick={() => moveRule(i, 1)} className="text-[9px] text-gray-400 hover:text-gray-600">▼</button>
               </div>
-              <span className={`text-xs font-bold ${i === 0 ? "text-blue-600" : "text-amber-600"}`}>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded ${i === 0 ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
                 {i === 0 ? "IF" : "ELSE IF"}
               </span>
             </div>
             <button type="button" onClick={() => removeRule(i)} className="text-[10px] text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">Remove</button>
           </div>
 
-          {/* Condition */}
-          <ConditionBuilder condition={rule.condition} questions={questions} onChange={val => updateRule(i, { condition: val })} />
+          {/* Condition builder */}
+          <div className="px-4 py-3 bg-white border-b border-gray-100">
+            <ConditionBuilder condition={rule.condition} questions={questions} onChange={val => updateRule(i, { condition: val })} />
+          </div>
 
-          {/* Output value with variable support */}
-          <div className="pt-1 border-t border-gray-100 space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-green-600 font-bold shrink-0">THEN →</span>
-              <ValueWithVarsInput value={rule.value} onChange={val => updateRule(i, { value: val })} questions={questions} placeholder="Output value — use {{variable}} to insert answers" />
+          {/* Output expression editor */}
+          <div className="px-4 py-3 bg-gradient-to-b from-green-50/50 to-white">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded">THEN &rarr;</span>
+              <span className="text-[10px] text-gray-400">Output expression</span>
             </div>
+            <ExpressionOutput value={rule.value} onChange={val => updateRule(i, { value: val })} questions={questions} />
           </div>
         </div>
       ))}
 
-      {/* Default / ELSE */}
-      <div className="rounded-xl border border-dashed border-gray-300 p-3 space-y-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-gray-500">ELSE →</span>
-          <ValueWithVarsInput value={cfg.defaultValue || ""} onChange={val => setCfg({ defaultValue: val })} questions={questions} placeholder="Default value (when no rules match)" />
+      {/* ELSE default */}
+      <div className="rounded-2xl border border-dashed border-gray-300 overflow-hidden">
+        <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+          <span className="text-[10px] font-bold text-gray-500 bg-gray-200 px-2 py-0.5 rounded">ELSE &rarr; Default</span>
+        </div>
+        <div className="px-4 py-3">
+          <ExpressionOutput value={cfg.defaultValue || ""} onChange={val => setCfg({ defaultValue: val })} questions={questions} />
         </div>
       </div>
 
@@ -1459,15 +1461,26 @@ function ConditionalRulesEditor({ cfg, setCfg, questions }: {
         + Add {rules.length > 0 ? "ELSE IF" : "IF"} rule
       </button>
 
-      {/* Preview */}
+      {/* Summary preview */}
       {(rules.length > 0 || cfg.defaultValue) && (
-        <div className="p-3 bg-gray-50 rounded-xl mt-2">
-          <p className="text-[10px] font-medium text-gray-500 mb-1">Reads as:</p>
-          <div className="text-xs text-gray-700 space-y-0.5">
+        <div className="p-3 bg-gray-50 rounded-xl">
+          <p className="text-[10px] font-medium text-gray-500 mb-1.5">Summary:</p>
+          <div className="text-xs text-gray-700 space-y-1">
             {rules.map((r, i) => (
-              <p key={i}><span className="font-bold text-blue-600">{i === 0 ? "IF" : "ELSE IF"}</span> {r.condition ? "conditions met" : "..."} <span className="font-bold text-green-600">→</span> <HighlightVars text={r.value || "..."} /></p>
+              <div key={i} className="flex items-start gap-1.5">
+                <span className={`font-bold shrink-0 ${i === 0 ? "text-blue-600" : "text-amber-600"}`}>{i === 0 ? "IF" : "ELSE IF"}</span>
+                <span className="text-gray-400">{r.condition ? "conditions met" : "..."}</span>
+                <span className="text-green-600 font-bold">&rarr;</span>
+                <HighlightExpr text={r.value || "..."} />
+              </div>
             ))}
-            {cfg.defaultValue && <p><span className="font-bold text-gray-500">ELSE</span> <span className="font-bold text-green-600">→</span> <HighlightVars text={cfg.defaultValue} /></p>}
+            {cfg.defaultValue && (
+              <div className="flex items-start gap-1.5">
+                <span className="font-bold text-gray-500 shrink-0">ELSE</span>
+                <span className="text-green-600 font-bold">&rarr;</span>
+                <HighlightExpr text={cfg.defaultValue} />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1475,71 +1488,123 @@ function ConditionalRulesEditor({ cfg, setCfg, questions }: {
   );
 }
 
-// ── Value input with variable insertion ──
+// -- Expression Output Editor (mini formula editor for THEN/ELSE values) --
 
-function ValueWithVarsInput({ value, onChange, questions, placeholder }: {
-  value: string; onChange: (v: string) => void; questions: Question[]; placeholder?: string;
+function ExpressionOutput({ value, onChange, questions }: {
+  value: string; onChange: (v: string) => void; questions: Question[];
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showVars, setShowVars] = useState(false);
+  const [showFns, setShowFns] = useState(false);
 
-  const insertVar = (name: string) => {
-    const input = inputRef.current;
-    if (!input) { onChange(value + `{{${name}}}`); return; }
-    const start = input.selectionStart || value.length;
-    const end = input.selectionEnd || value.length;
-    const newVal = value.slice(0, start) + `{{${name}}}` + value.slice(end);
+  const insertAtCursor = (text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) { onChange(value + text); return; }
+    const start = ta.selectionStart || value.length;
+    const end = ta.selectionEnd || value.length;
+    const newVal = value.slice(0, start) + text + value.slice(end);
     onChange(newVal);
-    // Restore cursor position after the inserted variable
-    setTimeout(() => { input.focus(); input.setSelectionRange(start + name.length + 4, start + name.length + 4); }, 0);
-    setShowVars(false);
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start + text.length, start + text.length); }, 0);
   };
 
+  const FN_SNIPPETS = [
+    { label: "if()", insert: 'if(, "", "")', desc: "Conditional" },
+    { label: "upper()", insert: "upper()", desc: "Uppercase" },
+    { label: "lower()", insert: "lower()", desc: "Lowercase" },
+    { label: "concat()", insert: 'concat(, " ", )', desc: "Join text" },
+    { label: "count()", insert: "count()", desc: "Count items" },
+    { label: "sum()", insert: "sum(.$.)", desc: "Sum field" },
+    { label: "round()", insert: "round(, 2)", desc: "Round number" },
+    { label: "format_date()", insert: 'format_date(, "MMMM D, YYYY")', desc: "Format date" },
+    { label: "format_currency()", insert: "format_currency()", desc: "$1,234.00" },
+    { label: "pluralize()", insert: 'pluralize(, "", "s")', desc: "Plural text" },
+    { label: "join()", insert: 'join(.$., ", ")', desc: "List to text" },
+    { label: "capitalize()", insert: "capitalize()", desc: "Cap first" },
+  ];
+
   return (
-    <div className="flex-1 relative">
-      <div className="flex gap-1">
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none font-mono"
-          placeholder={placeholder}
-        />
-        <button type="button" onClick={() => setShowVars(!showVars)}
-          className={`px-2 py-1 rounded-lg text-[10px] font-medium shrink-0 transition-colors ${showVars ? "bg-brand-100 text-brand-700" : "bg-gray-100 text-gray-500 hover:bg-brand-50 hover:text-brand-600"}`}
-          title="Insert variable">
-          {"{x}"}
-        </button>
+    <div className="space-y-2">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        rows={2}
+        className="w-full px-3 py-2 bg-gray-900 text-green-400 font-mono text-xs rounded-xl border border-gray-700 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none resize-y placeholder-gray-600"
+        placeholder={'{{first_name}} {{last_name}}\nor: upper({{company_name}}) + ", a " + {{state}} + " LLC"'}
+        spellCheck={false}
+      />
+
+      <div className="flex gap-1 flex-wrap">
+        <div className="relative">
+          <button type="button" onClick={() => { setShowVars(!showVars); setShowFns(false); }}
+            className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${showVars ? "bg-brand-100 text-brand-700" : "bg-gray-100 text-gray-500 hover:bg-brand-50"}`}>
+            {"{{x}}"} Variables
+          </button>
+          {showVars && (
+            <div className="absolute z-40 left-0 bottom-full mb-1 w-60 bg-white border border-gray-200 rounded-xl shadow-xl max-h-48 overflow-y-auto p-1.5">
+              {questions.map(q => (
+                <button key={q.name} type="button" onClick={() => { insertAtCursor(`{{${q.name}}}`); setShowVars(false); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-brand-50 transition-colors flex items-center justify-between gap-2">
+                  <span className="text-gray-700 truncate">{q.displayLabel}</span>
+                  <span className="text-[9px] text-gray-300 font-mono shrink-0">{q.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="relative">
+          <button type="button" onClick={() => { setShowFns(!showFns); setShowVars(false); }}
+            className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-colors ${showFns ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-purple-50"}`}>
+            f Functions
+          </button>
+          {showFns && (
+            <div className="absolute z-40 left-0 bottom-full mb-1 w-56 bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto p-1.5">
+              {FN_SNIPPETS.map(fn => (
+                <button key={fn.label} type="button" onClick={() => { insertAtCursor(fn.insert); setShowFns(false); }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-purple-50 transition-colors flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-purple-700 font-mono">{fn.label}</span>
+                    <span className="text-gray-400 ml-1">{fn.desc}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-1 flex-wrap ml-1">
+          <button type="button" onClick={() => insertAtCursor(' + "')} className="text-[9px] bg-gray-50 border border-gray-200 text-gray-400 px-1.5 py-0.5 rounded hover:bg-gray-100" title="Concatenate text">+ &quot;</button>
+          <button type="button" onClick={() => insertAtCursor('" + ')} className="text-[9px] bg-gray-50 border border-gray-200 text-gray-400 px-1.5 py-0.5 rounded hover:bg-gray-100" title="End text + continue">&quot; +</button>
+          <button type="button" onClick={() => insertAtCursor("\\n")} className="text-[9px] bg-gray-50 border border-gray-200 text-gray-400 px-1.5 py-0.5 rounded hover:bg-gray-100" title="Newline">newline</button>
+        </div>
       </div>
-      {showVars && (
-        <div className="absolute z-40 right-0 mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto p-1.5">
-          <p className="text-[9px] text-gray-400 px-2 py-1">Click to insert variable:</p>
-          {questions.map(q => (
-            <button key={q.name} type="button" onClick={() => insertVar(q.name)}
-              className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-brand-50 transition-colors flex items-center justify-between">
-              <span className="text-gray-700 truncate">{q.displayLabel}</span>
-              <span className="text-[9px] text-gray-300 font-mono shrink-0 ml-1">{q.name}</span>
-            </button>
-          ))}
+
+      {value && (
+        <div className="px-3 py-1.5 bg-white border border-gray-100 rounded-lg">
+          <p className="text-[9px] text-gray-400 mb-0.5">Preview:</p>
+          <p className="text-xs text-gray-700"><HighlightExpr text={value} /></p>
         </div>
       )}
     </div>
   );
 }
 
-// ── Highlight {{variables}} in preview text ──
+// -- Highlight expressions: {{vars}} in blue, functions() in purple --
 
-function HighlightVars({ text }: { text: string }) {
-  const parts = text.split(/({{[^}]+}})/g);
+function HighlightExpr({ text }: { text: string }) {
+  const parts = text.split(/({{[^}]+}}|(?:if|upper|lower|concat|count|sum|join|round|floor|ceil|format_date|format_currency|format_number|pluralize|capitalize|trim|left|right|replace|abs|min|max|add_days|add_months|add_years|days_between|ordinal|today|year|month)\([^)]*\))/g);
   return (
     <span>
-      &ldquo;{parts.map((part, i) =>
-        part.startsWith("{{") ? (
-          <code key={i} className="bg-brand-100 text-brand-700 px-0.5 rounded text-[10px]">{part}</code>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}&rdquo;
+      {parts.map((part, i) => {
+        if (part.startsWith("{{")) {
+          return <code key={i} className="bg-blue-100 text-blue-700 px-0.5 rounded text-[10px] font-mono">{part}</code>;
+        }
+        if (part.match(/^[a-z_]+\(/)) {
+          return <code key={i} className="bg-purple-100 text-purple-700 px-0.5 rounded text-[10px] font-mono">{part}</code>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
     </span>
   );
 }
