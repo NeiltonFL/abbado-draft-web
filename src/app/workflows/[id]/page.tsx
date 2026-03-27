@@ -165,7 +165,34 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
   const [adding, setAdding] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  useEffect(() => { setItems(questions); setDirty(false); }, [questions]);
+  useEffect(() => {
+    // Reconstitute: group Parent.$.field variables back under their parent
+    const parents: Question[] = [];
+    const subMap: Record<string, any[]> = {};
+
+    for (const q of questions) {
+      const dotDollar = q.name.match(/^(.+)\.\$\.(.+)$/);
+      if (dotDollar) {
+        const [, parentName, field] = dotDollar;
+        if (!subMap[parentName]) subMap[parentName] = [];
+        subMap[parentName].push({ field, label: q.displayLabel, type: q.type, required: q.required, helpText: q.helpText, validation: q.validation });
+      } else {
+        parents.push(q);
+      }
+    }
+
+    // Attach sub-questions to their parent's validation
+    for (const p of parents) {
+      if (subMap[p.name]) {
+        p.validation = { ...(p.validation || {}), subQuestions: subMap[p.name] };
+        // Mark as repeating type if it has sub-questions
+        if (p.type === "text" && subMap[p.name].length > 0) p.type = "repeating";
+      }
+    }
+
+    setItems(parents);
+    setDirty(false);
+  }, [questions]);
 
   const pageNames = pages.map(p => p.name);
   const groups = groupBy(items, q => q.groupName || "Unassigned");
@@ -192,12 +219,38 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
 
   const save = async () => {
     try {
-      await api.updateVariables(workflowId, items.map((q, i) => ({
-        name: q.name, displayLabel: q.displayLabel, type: q.type === "repeating" || q.type === "info" || q.type === "file_upload" || q.type === "computed" ? "text" : q.type,
-        required: q.required, defaultValue: q.defaultValue, validation: q.validation,
-        helpText: q.helpText, condition: q.condition, groupName: q.groupName,
-        displayOrder: i, isComputed: q.type === "computed" || q.isComputed, expression: q.expression,
-      })));
+      // Flatten: for each repeating item, emit the parent + all sub-questions as separate variables
+      const flat: any[] = [];
+      let order = 0;
+      for (const q of items) {
+        flat.push({
+          name: q.name, displayLabel: q.displayLabel,
+          type: q.type === "repeating" || q.type === "info" || q.type === "file_upload" || q.type === "computed" ? "text" : q.type,
+          required: q.required, defaultValue: q.defaultValue,
+          validation: q.validation,
+          helpText: q.helpText, condition: q.condition, groupName: q.groupName,
+          displayOrder: order++, isComputed: q.type === "computed" || q.isComputed, expression: q.expression,
+        });
+        // Emit sub-questions for repeating items
+        if (q.type === "repeating" && q.validation?.subQuestions) {
+          for (const sq of q.validation.subQuestions) {
+            flat.push({
+              name: `${q.name}.$.${sq.field}`,
+              displayLabel: sq.label,
+              type: sq.type || "text",
+              required: sq.required || false,
+              defaultValue: null,
+              validation: sq.validation || null,
+              helpText: sq.helpText || null,
+              condition: null,
+              groupName: q.groupName, // same page as parent
+              displayOrder: order++,
+              isComputed: false, expression: null,
+            });
+          }
+        }
+      }
+      await api.updateVariables(workflowId, flat);
       await onUpdate();
       setDirty(false);
       flash("Questions saved");
@@ -926,12 +979,16 @@ function TypeConfig({ q, onUpdate, ic, allQuestions }: {
           </div>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" checked={v.collectOnSeparatePage ?? false} onChange={e => setV({ collectOnSeparatePage: e.target.checked })} className="rounded border-gray-300" />
-            Collect each item on its own page
+            Collect each {v.itemLabel || "item"} on its own page
           </label>
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-xs text-blue-700">Sub-questions for each {v.itemLabel || "item"} are defined by creating questions with names like <code className="bg-blue-100 px-1 rounded">{q.name}.$.field_name</code></p>
-            <p className="text-xs text-blue-600 mt-1">Example: <code className="bg-blue-100 px-1 rounded">{q.name}.$.name</code>, <code className="bg-blue-100 px-1 rounded">{q.name}.$.email</code>, <code className="bg-blue-100 px-1 rounded">{q.name}.$.shares</code></p>
-          </div>
+
+          {/* ── Inline Sub-Question Builder ── */}
+          <SubQuestionBuilder
+            parentName={q.name}
+            itemLabel={v.itemLabel || "item"}
+            subQuestions={v.subQuestions || []}
+            onChange={subs => setV({ subQuestions: subs })}
+          />
         </div>
       );
 
@@ -977,6 +1034,121 @@ function TypeConfig({ q, onUpdate, ic, allQuestions }: {
     default:
       return null;
   }
+}
+
+// ── Sub-Question Builder (for Repeating Items) ──
+
+const SUB_TYPES = QUESTION_TYPES.filter(t => !["repeating", "info", "computed", "file_upload"].includes(t.value));
+
+function SubQuestionBuilder({ parentName, itemLabel, subQuestions, onChange }: {
+  parentName: string; itemLabel: string;
+  subQuestions: { field: string; label: string; type: string; required: boolean; helpText?: string; validation?: any }[];
+  onChange: (subs: any[]) => void;
+}) {
+  const [addingField, setAddingField] = useState("");
+  const [addingLabel, setAddingLabel] = useState("");
+  const [addingType, setAddingType] = useState("text");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const add = () => {
+    const field = addingField.trim() || addingLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    const label = addingLabel.trim();
+    if (!field || !label) return;
+    if (subQuestions.some(s => s.field === field)) return;
+    onChange([...subQuestions, { field, label, type: addingType, required: false }]);
+    setAddingField("");
+    setAddingLabel("");
+    setAddingType("text");
+    inputRef.current?.focus();
+  };
+
+  const remove = (idx: number) => onChange(subQuestions.filter((_, i) => i !== idx));
+
+  const update = (idx: number, updates: Record<string, any>) => {
+    onChange(subQuestions.map((s, i) => i === idx ? { ...s, ...updates } : s));
+  };
+
+  const move = (idx: number, dir: -1 | 1) => {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= subQuestions.length) return;
+    const next = [...subQuestions];
+    [next[idx], next[ni]] = [next[ni], next[idx]];
+    onChange(next);
+  };
+
+  return (
+    <div className="border border-brand-200 rounded-xl bg-brand-50/30 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-brand-700">Fields collected for each {itemLabel}</p>
+          <p className="text-[10px] text-brand-500">Define what information you need per {itemLabel.toLowerCase()}</p>
+        </div>
+        <span className="text-xs text-brand-400">{subQuestions.length} field{subQuestions.length !== 1 ? "s" : ""}</span>
+      </div>
+
+      {/* Existing sub-questions */}
+      {subQuestions.length > 0 && (
+        <div className="space-y-1.5">
+          {subQuestions.map((sq, i) => {
+            const ti = SUB_TYPES.find(t => t.value === sq.type);
+            return (
+              <div key={i} className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-2 group">
+                <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100">
+                  <button type="button" onClick={() => move(i, -1)} className="text-[9px] leading-none text-gray-400">▲</button>
+                  <button type="button" onClick={() => move(i, 1)} className="text-[9px] leading-none text-gray-400">▼</button>
+                </div>
+                <span className="w-5 h-5 bg-gray-100 rounded flex items-center justify-center text-[10px] shrink-0">{ti?.icon || "?"}</span>
+                <input
+                  value={sq.label}
+                  onChange={e => update(i, { label: e.target.value })}
+                  className="flex-1 text-sm bg-transparent border-none outline-none p-0 min-w-0"
+                  placeholder="Field label"
+                />
+                <select
+                  value={sq.type}
+                  onChange={e => update(i, { type: e.target.value })}
+                  className="text-[10px] bg-gray-50 border border-gray-200 rounded px-1.5 py-0.5 outline-none"
+                >
+                  {SUB_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer shrink-0">
+                  <input type="checkbox" checked={sq.required} onChange={e => update(i, { required: e.target.checked })} className="rounded border-gray-300 w-3 h-3" />
+                  Req
+                </label>
+                <span className="text-[9px] text-gray-300 font-mono shrink-0" title={`Template variable: ${parentName}.$.${sq.field}`}>{parentName}.$.{sq.field}</span>
+                <button type="button" onClick={() => remove(i)} className="text-red-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 shrink-0">✕</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add new sub-question */}
+      <div className="flex gap-2 items-end">
+        <div className="flex-1">
+          <label className="block text-[10px] text-brand-600 mb-0.5">Field label</label>
+          <input
+            ref={inputRef}
+            value={addingLabel}
+            onChange={e => { setAddingLabel(e.target.value); if (!addingField) setAddingField(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")); }}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+            placeholder={`e.g., ${itemLabel} Name, Email, Shares...`}
+          />
+        </div>
+        <div className="w-28">
+          <label className="block text-[10px] text-brand-600 mb-0.5">Type</label>
+          <select value={addingType} onChange={e => setAddingType(e.target.value)} className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 outline-none">
+            {SUB_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+          </select>
+        </div>
+        <button type="button" onClick={add} disabled={!addingLabel.trim()} className="px-3 py-1.5 bg-brand-600 text-white rounded-lg text-sm hover:bg-brand-700 disabled:opacity-30 shrink-0">
+          + Add
+        </button>
+      </div>
+      <p className="text-[10px] text-brand-400">Type a label and press Enter or click Add. Each field becomes a question the user answers for every {itemLabel.toLowerCase()}.</p>
+    </div>
+  );
 }
 
 // ── Options Editor (for Dropdown / Multiple Choice) ──
