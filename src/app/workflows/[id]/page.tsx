@@ -59,7 +59,6 @@ const QUESTION_TYPES = [
   { value: "file_upload", label: "File Upload", icon: "📎", desc: "Upload a document" },
   { value: "info", label: "Info Block", icon: "ℹ", desc: "Display-only text (no input)" },
   { value: "repeating", label: "Repeating Item", icon: "↻", desc: "Collect a list (e.g. founders, assets)" },
-  { value: "computed", label: "Calculation", icon: "ƒ", desc: "Auto-computed from other answers" },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -599,7 +598,7 @@ function AddQuestionModal({ onAdd, onClose, pageNames, allQuestions }: {
           <button disabled={!label || !name || nameTaken} onClick={() => onAdd({
             id: `new_${Date.now()}`, name, displayLabel: label, type, required,
             defaultValue: null, validation: null, helpText: null, condition: null,
-            groupName: page || null, displayOrder: allQuestions.length, isComputed: type === "computed",
+            groupName: page || null, displayOrder: allQuestions.length, isComputed: false,
             expression: null, _isNew: true,
           })} className="px-5 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-40">
             Add question
@@ -1551,51 +1550,217 @@ function FormulaEditor({ item, cfg, setCfg, onUpdate, questions, allQuestions }:
   item: Question; cfg: LogicConfig; setCfg: (u: Partial<LogicConfig>) => void;
   onUpdate: (u: Partial<Question>) => void; questions: Question[]; allQuestions: Question[];
 }) {
+  const formula = item.expression || cfg.formula || "";
+  const setFormula = (val: string) => { onUpdate({ expression: val }); setCfg({ formula: val }); };
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [testValues, setTestValues] = useState<Record<string, string>>({});
+  const [showTest, setShowTest] = useState(false);
+  const [showRef, setShowRef] = useState(false);
+
+  const insertAtCursor = (text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) { setFormula(formula + text); return; }
+    const start = ta.selectionStart || formula.length;
+    const end = ta.selectionEnd || formula.length;
+    const newVal = formula.slice(0, start) + text + formula.slice(end);
+    setFormula(newVal);
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start + text.length, start + text.length); }, 0);
+  };
+
+  // Validation
+  const warnings: string[] = [];
+  const openBrackets = (formula.match(/{{/g) || []).length;
+  const closeBrackets = (formula.match(/}}/g) || []).length;
+  if (openBrackets !== closeBrackets) warnings.push(`Mismatched brackets: ${openBrackets} {{ vs ${closeBrackets} }}`);
+  const openParens = (formula.match(/\(/g) || []).length;
+  const closeParens = (formula.match(/\)/g) || []).length;
+  if (openParens !== closeParens) warnings.push(`Mismatched parentheses: ${openParens} ( vs ${closeParens} )`);
+  const usedVars = Array.from(new Set((formula.match(/{{(\w+)}}/g) || []).map(m => m.replace(/[{}]/g, ""))));
+  const knownNames = new Set(allQuestions.map(q => q.name));
+  const unknownVars = usedVars.filter(v => !knownNames.has(v));
+  if (unknownVars.length > 0) warnings.push(`Unknown variable${unknownVars.length > 1 ? "s" : ""}: ${unknownVars.join(", ")}`);
+
+  // Live preview
+  const previewResult = (() => {
+    if (!formula) return "";
+    let result = formula;
+    // Replace {{var}} with test values
+    result = result.replace(/{{(\w+)}}/g, (_, name) => testValues[name] || `[${name}]`);
+    // Simple if() evaluation for preview
+    result = result.replace(/if\(([^,]+),\s*"([^"]*)",\s*"([^"]*)"\)/g, (_, cond, then, els) => {
+      const c = cond.trim();
+      if (c in testValues) return testValues[c] ? then : els;
+      return `[if(${c})]`;
+    });
+    return result;
+  })();
+
+  // Referenced variables in the formula
+  const referencedVars = usedVars.filter(v => knownNames.has(v));
+
   const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  // Preset templates
+  const PRESETS = [
+    { label: "Full Name", desc: "First + middle (if given) + last", formula: '{{first_name}} {{if(middle_name, middle_name + " ", "")}}{{last_name}}' },
+    { label: "Pronoun (he/she/they)", desc: "Based on gender field", formula: 'if(gender == "Male", "he", if(gender == "Female", "she", "they"))' },
+    { label: "Possessive (his/her/their)", desc: "Based on gender field", formula: 'if(gender == "Male", "his", if(gender == "Female", "her", "their"))' },
+    { label: "Entity Label", desc: "Company name + state + type", formula: '{{company_name}}, a {{state}} {{if(entity_type == "LLC", "limited liability company", "corporation")}}' },
+    { label: "Founder Count Text", desc: "Pluralized count", formula: '{{count(founders)}} founder{{if(count(founders) > 1, "s", "")}}' },
+    { label: "Date + Days", desc: "Add days to a date", formula: 'format_date(add_days(formation_date, 90), "MMMM D, YYYY")' },
+    { label: "Currency Format", desc: "Format number as dollars", formula: '"$" + format_number(amount, 2)' },
+    { label: "Address Line", desc: "Single-line address", formula: '{{address.street}}, {{address.city}}, {{address.state}} {{address.zip}}' },
+    { label: "Uppercase Name", desc: "Company name in caps", formula: 'upper(company_name)' },
+  ];
 
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div>
-        <p className="text-xs font-medium text-gray-600 mb-1">Formula</p>
-        <p className="text-[10px] text-gray-400 mb-2">Write an expression using variable names, math operators, and functions.</p>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-medium text-gray-600">Expression Editor</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setShowTest(!showTest)}
+              className={`text-[10px] px-2 py-0.5 rounded-lg ${showTest ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500 hover:bg-green-50"}`}>
+              {showTest ? "▾ Test" : "▸ Test with values"}
+            </button>
+            <button type="button" onClick={() => setShowRef(!showRef)}
+              className={`text-[10px] px-2 py-0.5 rounded-lg ${showRef ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-500 hover:bg-purple-50"}`}>
+              {showRef ? "▾ Reference" : "▸ Reference"}
+            </button>
+          </div>
+        </div>
+        <p className="text-[10px] text-gray-400">Mix plain text, <code className="bg-gray-100 px-1 rounded">{"{{variables}}"}</code>, and <code className="bg-gray-100 px-1 rounded">functions()</code> freely.</p>
+      </div>
+
+      {/* Presets */}
+      <div>
+        <p className="text-[10px] text-gray-500 mb-1.5">Quick start — click a preset to insert:</p>
+        <div className="flex flex-wrap gap-1.5">
+          {PRESETS.map(p => (
+            <button key={p.label} type="button" onClick={() => setFormula(p.formula)}
+              className="text-[10px] bg-gray-50 border border-gray-200 text-gray-600 px-2 py-1 rounded-lg hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 transition-colors"
+              title={p.desc}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Editor */}
+      <div>
         <textarea
-          value={item.expression || cfg.formula || ""}
-          onChange={e => { onUpdate({ expression: e.target.value }); setCfg({ formula: e.target.value }); }}
-          className={`${ic} h-28 font-mono text-xs resize-y`}
-          placeholder={'e.g., total_shares * price_per_share\ne.g., upper(company_name)\ne.g., add_days(formation_date, 90)'}
+          ref={textareaRef}
+          value={formula}
+          onChange={e => setFormula(e.target.value)}
+          className={`${ic} h-28 font-mono text-xs resize-y bg-gray-900 text-green-400 placeholder-gray-600 border-gray-700 focus:ring-brand-500 focus:border-brand-500`}
+          placeholder={'Mix text and code freely:\n{{first_name}} {{last_name}}\n"Total: $" + round(shares * price, 2)\nif(state == "DE", "Delaware", state)'}
+          spellCheck={false}
         />
       </div>
 
-      {/* Available variables */}
+      {/* Variable chips — click to insert */}
       <div>
-        <p className="text-[10px] text-gray-500 mb-1">Click a variable to insert:</p>
-        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+        <p className="text-[10px] text-gray-500 mb-1">Insert variable:</p>
+        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
           {questions.map(q => (
-            <button key={q.id} type="button" onClick={() => {
-              const cur = item.expression || cfg.formula || "";
-              const updated = cur + (cur ? " " : "") + q.name;
-              onUpdate({ expression: updated });
-              setCfg({ formula: updated });
-            }} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded hover:bg-brand-50 hover:text-brand-600">
+            <button key={q.id} type="button" onClick={() => insertAtCursor(`{{${q.name}}}`)}
+              className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded hover:bg-brand-50 hover:text-brand-600 font-mono">
               {q.name}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Reference card */}
-      <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-1.5">
-        <p className="text-xs text-purple-700 font-medium">Reference</p>
-        <div className="text-[10px] text-purple-600 space-y-1">
-          <p><strong>Math:</strong> <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code> (modulo) — <code>total_shares * price</code></p>
-          <p><strong>Compare:</strong> <code>{">"}</code> <code>{"<"}</code> <code>==</code> <code>!=</code> — <code>shares {">"} 1000 ? "major" : "minor"</code></p>
-          <p><strong>Text:</strong> <code>upper(x)</code> <code>lower(x)</code> <code>trim(x)</code> <code>concat(a, " ", b)</code> <code>left(x, n)</code> <code>right(x, n)</code></p>
-          <p><strong>Math fns:</strong> <code>round(x)</code> <code>floor(x)</code> <code>ceil(x)</code> <code>min(a,b)</code> <code>max(a,b)</code> <code>abs(x)</code> <code>sum(repeating.$.field)</code></p>
-          <p><strong>Date:</strong> <code>days_between(d1, d2)</code> <code>add_days(d, n)</code> <code>add_months(d, n)</code> <code>format_date(d, "MMMM D, YYYY")</code></p>
-          <p><strong>Logic:</strong> <code>if(condition, then, else)</code> — <code>if(state == "DE", "Delaware", state)</code></p>
-          <p><strong>Counts:</strong> <code>count(repeating_item)</code> — number of items in a repeating list</p>
+      {/* Validation warnings */}
+      {warnings.length > 0 && (
+        <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl space-y-0.5">
+          {warnings.map((w, i) => (
+            <p key={i} className="text-[10px] text-red-600">⚠ {w}</p>
+          ))}
         </div>
-      </div>
+      )}
+
+      {/* Live preview with test values */}
+      {showTest && (
+        <div className="p-3 bg-green-50 border border-green-200 rounded-xl space-y-3">
+          <p className="text-xs text-green-700 font-medium">Test with sample values</p>
+          {referencedVars.length > 0 ? (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                {referencedVars.map(v => {
+                  const srcQ = allQuestions.find(q => q.name === v);
+                  return (
+                    <div key={v}>
+                      <label className="block text-[10px] text-green-600 mb-0.5">{srcQ?.displayLabel || v}</label>
+                      <input value={testValues[v] || ""} onChange={e => setTestValues(p => ({ ...p, [v]: e.target.value }))}
+                        className="w-full px-2 py-1 border border-green-200 rounded text-xs outline-none focus:ring-1 focus:ring-green-400 bg-white"
+                        placeholder={v} />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="pt-2 border-t border-green-200">
+                <p className="text-[10px] text-green-600 mb-0.5">Output preview:</p>
+                <div className="bg-white rounded-lg px-3 py-2 text-sm text-gray-900 font-medium border border-green-200">
+                  {previewResult || <span className="text-gray-300 italic">Enter values above to preview</span>}
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="text-[10px] text-green-600">Add <code>{"{{variables}}"}</code> to your formula to test with sample values.</p>
+          )}
+        </div>
+      )}
+
+      {/* Reference card */}
+      {showRef && (
+        <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-2">
+          <p className="text-xs text-purple-700 font-medium">Expression Reference</p>
+          <div className="text-[10px] text-purple-600 space-y-1.5">
+            <div>
+              <p className="font-bold text-purple-800">Text + Variables (most common)</p>
+              <p><code className="bg-purple-100 px-1 rounded">{"{{first_name}} {{last_name}}"}</code> → John Smith</p>
+              <p><code className="bg-purple-100 px-1 rounded">{"The Company, {{company_name}}, hereby..."}</code> → The Company, Acme Inc, hereby...</p>
+            </div>
+            <div>
+              <p className="font-bold text-purple-800">Inline Conditionals</p>
+              <p><code className="bg-purple-100 px-1 rounded">{'if(condition, "then", "else")'}</code></p>
+              <p><code className="bg-purple-100 px-1 rounded">{'if(gender == "Male", "his", "her")'}</code> → his</p>
+              <p><code className="bg-purple-100 px-1 rounded">{'if(middle_name, "{{first_name}} {{middle_name}} {{last_name}}", "{{first_name}} {{last_name}}")'}</code></p>
+            </div>
+            <div>
+              <p className="font-bold text-purple-800">Math</p>
+              <p><code className="bg-purple-100 px-1 rounded">+</code> <code className="bg-purple-100 px-1 rounded">-</code> <code className="bg-purple-100 px-1 rounded">*</code> <code className="bg-purple-100 px-1 rounded">/</code> <code className="bg-purple-100 px-1 rounded">%</code> — <code className="bg-purple-100 px-1 rounded">round(shares * price, 2)</code></p>
+              <p><code className="bg-purple-100 px-1 rounded">min(a, b)</code> <code className="bg-purple-100 px-1 rounded">max(a, b)</code> <code className="bg-purple-100 px-1 rounded">abs(x)</code> <code className="bg-purple-100 px-1 rounded">ceil(x)</code> <code className="bg-purple-100 px-1 rounded">floor(x)</code></p>
+            </div>
+            <div>
+              <p className="font-bold text-purple-800">Text Functions</p>
+              <p><code className="bg-purple-100 px-1 rounded">upper(x)</code> <code className="bg-purple-100 px-1 rounded">lower(x)</code> <code className="bg-purple-100 px-1 rounded">trim(x)</code> <code className="bg-purple-100 px-1 rounded">capitalize(x)</code></p>
+              <p><code className="bg-purple-100 px-1 rounded">left(x, n)</code> <code className="bg-purple-100 px-1 rounded">right(x, n)</code> <code className="bg-purple-100 px-1 rounded">concat(a, " ", b)</code> <code className="bg-purple-100 px-1 rounded">replace(x, find, replace)</code></p>
+            </div>
+            <div>
+              <p className="font-bold text-purple-800">Date Functions</p>
+              <p><code className="bg-purple-100 px-1 rounded">add_days(date, n)</code> <code className="bg-purple-100 px-1 rounded">add_months(date, n)</code> <code className="bg-purple-100 px-1 rounded">add_years(date, n)</code></p>
+              <p><code className="bg-purple-100 px-1 rounded">days_between(d1, d2)</code> <code className="bg-purple-100 px-1 rounded">{'format_date(d, "MMMM D, YYYY")'}</code></p>
+              <p><code className="bg-purple-100 px-1 rounded">today()</code> <code className="bg-purple-100 px-1 rounded">year(date)</code> <code className="bg-purple-100 px-1 rounded">month(date)</code></p>
+            </div>
+            <div>
+              <p className="font-bold text-purple-800">Repeating Item Aggregates</p>
+              <p><code className="bg-purple-100 px-1 rounded">count(founders)</code> — number of items</p>
+              <p><code className="bg-purple-100 px-1 rounded">sum(founders.$.shares)</code> — total across all items</p>
+              <p><code className="bg-purple-100 px-1 rounded">join(founders.$.name, ", ")</code> — comma-separated list</p>
+            </div>
+            <div>
+              <p className="font-bold text-purple-800">Formatting</p>
+              <p><code className="bg-purple-100 px-1 rounded">format_number(x, decimals)</code> — <code>format_number(1234.5, 2)</code> → 1,234.50</p>
+              <p><code className="bg-purple-100 px-1 rounded">format_currency(x)</code> — <code>format_currency(1500)</code> → $1,500.00</p>
+              <p><code className="bg-purple-100 px-1 rounded">ordinal(n)</code> — <code>ordinal(3)</code> → 3rd</p>
+              <p><code className="bg-purple-100 px-1 rounded">pluralize(n, singular, plural)</code> — <code>{'pluralize(count, "share", "shares")'}</code></p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2241,37 +2406,6 @@ function TypeConfig({ q, onUpdate, ic, allQuestions }: {
             subQuestions={v.subQuestions || []}
             onChange={subs => setV({ subQuestions: subs })}
           />
-        </div>
-      );
-
-    case "computed":
-      return (
-        <div className="space-y-3">
-          <Field label="Calculation formula" sub="Reference other question variable names">
-            <textarea value={q.expression || ""} onChange={e => onUpdate({ expression: e.target.value })} className={`${ic} h-20 font-mono text-xs resize-y`} placeholder="e.g., authorized_shares - esop_shares" />
-          </Field>
-          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-1">
-            <p className="text-xs text-purple-700 font-medium">Available operators and functions:</p>
-            <p className="text-[10px] text-purple-600">Math: <code className="bg-purple-100 px-1 rounded">+</code> <code className="bg-purple-100 px-1 rounded">-</code> <code className="bg-purple-100 px-1 rounded">*</code> <code className="bg-purple-100 px-1 rounded">/</code> <code className="bg-purple-100 px-1 rounded">%</code> (modulo)</p>
-            <p className="text-[10px] text-purple-600">Functions: <code className="bg-purple-100 px-1 rounded">round(x)</code> <code className="bg-purple-100 px-1 rounded">floor(x)</code> <code className="bg-purple-100 px-1 rounded">ceil(x)</code> <code className="bg-purple-100 px-1 rounded">min(a,b)</code> <code className="bg-purple-100 px-1 rounded">max(a,b)</code></p>
-            <p className="text-[10px] text-purple-600">Date: <code className="bg-purple-100 px-1 rounded">days_between(date1, date2)</code> <code className="bg-purple-100 px-1 rounded">add_days(date, n)</code></p>
-          </div>
-          <Field label="Display format"><select value={v.displayFormat ?? "number"} onChange={e => setV({ displayFormat: e.target.value })} className={ic}><option value="number">Number</option><option value="currency">Currency ($)</option><option value="percent">Percentage (%)</option><option value="date">Date</option><option value="text">Text</option></select></Field>
-          {allQuestions.filter(aq => aq.id !== q.id && !aq.isComputed).length > 0 && (
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Available variables:</p>
-              <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-                {allQuestions.filter(aq => aq.id !== q.id && !aq.isComputed).map(aq => (
-                  <button key={aq.id} type="button" onClick={() => {
-                    const cur = q.expression || "";
-                    onUpdate({ expression: cur + (cur ? " " : "") + aq.name });
-                  }} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded hover:bg-brand-50 hover:text-brand-600 cursor-pointer">
-                    {aq.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       );
 
