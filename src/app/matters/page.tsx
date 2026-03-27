@@ -120,7 +120,8 @@ function NewMatterModal({ workflows, onClose, onCreate }: { workflows: any[]; on
   const [error, setError] = useState("");
 
   const handleCreate = async () => {
-    if (!name || !workflowId) return;
+    if (!name) { setError("Please enter a matter name."); return; }
+    if (!workflowId) { setError("No workflow selected. Seed a workflow first."); return; }
     setSubmitting(true);
     setError("");
     try {
@@ -149,14 +150,18 @@ function NewMatterModal({ workflows, onClose, onCreate }: { workflows: any[]; on
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Workflow</label>
-            <select
-              value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
-            >
-              {workflows.map((w) => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
+            {workflows.length === 0 ? (
+              <p className="text-sm text-amber-600 bg-amber-50 rounded-lg px-3 py-2">No workflows found. Go to Workflows and seed a demo or create one first.</p>
+            ) : (
+              <select
+                value={workflowId} onChange={(e) => setWorkflowId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+              >
+                {workflows.map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -165,7 +170,7 @@ function NewMatterModal({ workflows, onClose, onCreate }: { workflows: any[]; on
         <div className="flex justify-end gap-3 mt-6">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
           <button
-            onClick={handleCreate} disabled={submitting || !name}
+            onClick={handleCreate} disabled={submitting || !name || !workflowId}
             className="px-4 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50"
           >
             {submitting ? "Creating..." : "Create & start interview"}
