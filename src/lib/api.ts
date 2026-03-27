@@ -58,6 +58,9 @@ class ApiClient {
   updateVariables(workflowId: string, variables: any[]) {
     return this.request<any>(`/api/workflows/${workflowId}/variables`, { method: "PUT", body: JSON.stringify({ variables }) });
   }
+  seedDemoWorkflow() {
+    return this.request<any>("/api/workflows/seed-demo", { method: "POST" });
+  }
 
   // ── Matters ──
   getMatters(params?: { workflowId?: string; status?: string; search?: string }) {
