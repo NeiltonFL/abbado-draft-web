@@ -78,6 +78,7 @@ class ApiClient {
   }
   getMatter(id: string) { return this.request<any>(`/api/matters/${id}`); }
   createMatter(data: any) { return this.request<any>("/api/matters", { method: "POST", body: JSON.stringify(data) }); }
+  deleteMatter(id: string) { return this.request<any>(`/api/matters/${id}`, { method: "DELETE" }); }
   updateVariableValues(matterId: string, variables: any, source: string = "web") {
     return this.request<any>(`/api/matters/${matterId}/variables`, { method: "PATCH", body: JSON.stringify({ variables, source }) });
   }
