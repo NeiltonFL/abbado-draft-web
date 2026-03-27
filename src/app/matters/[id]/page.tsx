@@ -117,29 +117,64 @@ export default function MatterDetailPage() {
         {tab === "overview" && (
           <div className="grid grid-cols-3 gap-4">
             <div className="col-span-2 space-y-4">
+              {/* Generate / Documents section */}
               <div className="bg-white rounded-xl border border-gray-200 p-5">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">Generated documents</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium text-gray-700">Documents</h3>
+                  {docs.length > 0 && (
+                    <button onClick={handleRegenerate} className="text-xs text-brand-600 hover:text-brand-700">Regenerate</button>
+                  )}
+                </div>
                 {docs.length === 0 ? (
-                  <p className="text-sm text-gray-400">No documents generated yet. Complete the interview to generate.</p>
+                  <div className="text-center py-6">
+                    <p className="text-2xl mb-2">📄</p>
+                    <p className="text-sm text-gray-500 mb-1">No documents generated yet</p>
+                    <p className="text-xs text-gray-400 mb-4">Complete the interview and generate your document set</p>
+                    <div className="flex items-center justify-center gap-2">
+                      <Link href={`/matters/${matterId}/interview`}
+                        className="px-4 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600">
+                        Start interview
+                      </Link>
+                      <button onClick={async () => {
+                        try {
+                          setLoading(true);
+                          const result = await api.generateDocuments(matterId, "live");
+                          const m = await api.getMatter(matterId);
+                          setMatter(m);
+                          setLoading(false);
+                        } catch (err: any) {
+                          alert(err.message);
+                          setLoading(false);
+                        }
+                      }} className="px-4 py-2 border border-brand-200 text-brand-700 rounded-lg text-sm font-medium hover:bg-brand-50">
+                        Generate now
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {docs.map((doc: any) => (
-                      <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{doc.template?.name}</p>
-                          <p className="text-xs text-gray-400">{doc.template?.format?.toUpperCase()} • {doc.mode} mode</p>
+                      <div key={doc.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-100 hover:border-brand-200 transition-colors group">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-sm">📄</div>
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{doc.template?.name}</p>
+                            <p className="text-xs text-gray-400">
+                              {doc.template?.format?.toUpperCase()} • {doc.mode} mode • {new Date(doc.generatedAt).toLocaleString()}
+                            </p>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2">
                           {doc._count?.editJournal > 0 && (
-                            <span className="text-xs text-brand-600">{doc._count.editJournal} edits</span>
+                            <span className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded">{doc._count.editJournal} edits</span>
                           )}
                           {doc.filePath ? (
-                            <button
-                              onClick={() => handleDownload(doc.id)}
-                              className="px-3 py-1 text-xs bg-brand-50 text-brand-700 rounded-lg hover:bg-brand-100"
-                            >Download</button>
+                            <button onClick={() => handleDownload(doc.id)}
+                              className="px-4 py-1.5 text-sm bg-brand-700 text-white rounded-lg hover:bg-brand-600 opacity-80 group-hover:opacity-100 transition-opacity">
+                              Download
+                            </button>
                           ) : (
-                            <span className="text-xs text-gray-400">Pending</span>
+                            <span className="text-xs text-amber-500 bg-amber-50 px-2 py-1 rounded">No template file</span>
                           )}
                         </div>
                       </div>

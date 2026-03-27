@@ -1969,7 +1969,13 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
             These are the Word templates that get generated when a user completes the interview. You can add <strong>document logic</strong> to control which documents are generated based on answers.
           </p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-brand-700 text-white rounded-lg text-sm hover:bg-brand-600">+ Add document</button>
+        <div className="flex gap-2">
+          <button onClick={async () => { try { await api.downloadSampleTemplate(workflowId); flash("Sample template downloaded"); } catch (err: any) { flash("Error: " + err.message); } }}
+            className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50" title="Downloads a .docx with all your workflow variables as {{placeholders}}">
+            ↓ Sample template
+          </button>
+          <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-brand-700 text-white rounded-lg text-sm hover:bg-brand-600">+ Add document</button>
+        </div>
       </div>
 
       {templates.length === 0 ? (

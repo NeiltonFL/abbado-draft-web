@@ -96,6 +96,24 @@ class ApiClient {
   }
   getDownloadUrl(docId: string) { return this.request<any>(`/api/engine/download/${docId}`); }
 
+  async downloadSampleTemplate(workflowId: string) {
+    const { supabase } = await import("./supabase");
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+    const res = await fetch(`${this.baseUrl}/api/engine/sample-template/${workflowId}`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error((await res.json()).error || "Failed to generate sample template");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${workflowId}_sample_template.docx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // ── Activity ──
   getActivity(params?: { matterId?: string; limit?: number }) {
     const qs = new URLSearchParams(params as any).toString();
