@@ -92,9 +92,12 @@ export default function WorkflowBuilderPage() {
 
   const flash = (msg: string) => { setSaveMsg(msg); setTimeout(() => setSaveMsg(""), 2500); };
 
+  const logicVars = questions.filter(q => q.isComputed || q.type === "computed");
+
   const TABS = [
-    { key: "questions", label: "Questions", count: questions.length },
+    { key: "questions", label: "Questions", count: questions.filter(q => !q.isComputed && q.type !== "computed").length },
     { key: "pages", label: "Pages", count: pages.length },
+    { key: "logic", label: "Logic", count: logicVars.length },
     { key: "documents", label: "Output Documents", count: templates.length },
     { key: "preview", label: "Preview" },
   ];
@@ -119,11 +122,10 @@ export default function WorkflowBuilderPage() {
 
         {/* Stats */}
         <div className="flex gap-4 mb-5 text-xs">
-          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.length} question{questions.length !== 1 ? "s" : ""}</span>
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.filter(q => !q.isComputed && q.type !== "computed").length} question{questions.length !== 1 ? "s" : ""}</span>
           <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{pages.length} page{pages.length !== 1 ? "s" : ""}</span>
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{logicVars.length} logic rule{logicVars.length !== 1 ? "s" : ""}</span>
           <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{templates.length} document{templates.length !== 1 ? "s" : ""}</span>
-          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.filter(q => q.condition).length} with logic</span>
-          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.filter(q => q.isComputed).length} calculations</span>
         </div>
 
         {/* Tabs */}
@@ -139,6 +141,7 @@ export default function WorkflowBuilderPage() {
 
         {tab === "questions" && <QuestionsTab workflowId={workflowId} questions={questions} pages={pages} onUpdate={reload} flash={flash} />}
         {tab === "pages" && <PagesTab workflowId={workflowId} pages={pages} questions={questions} onUpdate={reload} flash={flash} />}
+        {tab === "logic" && <LogicTab workflowId={workflowId} questions={questions} onUpdate={reload} flash={flash} />}
         {tab === "documents" && <DocumentsTab workflowId={workflowId} templates={templates} allTemplates={allTemplates} questions={questions} onUpdate={reload} flash={flash} />}
         {tab === "preview" && <PreviewTab pages={pages} questions={questions} />}
       </div>
@@ -1109,6 +1112,511 @@ function SectionEditor({ name, pages: sectionPages, questions, onRename, onRemov
           {sectionPages.length > 0 && ` First page: "${sectionPages[0].name}".`}
         </p>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOGIC TAB (Hidden Variables)
+// ═══════════════════════════════════════════════════════════
+
+interface LogicRule {
+  condition: string; // JSON condition data
+  value: string; // output value when condition is true
+}
+
+interface LogicConfig {
+  logicType: "conditional" | "formula" | "lookup";
+  rules?: LogicRule[];
+  defaultValue?: string;
+  formula?: string;
+  lookupVariable?: string;
+  lookupTable?: Record<string, string>;
+  outputType?: string;
+}
+
+function LogicTab({ workflowId, questions, onUpdate, flash }: {
+  workflowId: string; questions: Question[]; onUpdate: () => Promise<void>; flash: (m: string) => void;
+}) {
+  const visibleQuestions = questions.filter(q => !q.isComputed && q.type !== "computed" && !q.name.includes(".$." ));
+  const logicVars = questions.filter(q => q.isComputed || q.type === "computed");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [items, setItems] = useState<Question[]>(logicVars);
+
+  useEffect(() => { setItems(logicVars); setDirty(false); }, [questions]);
+
+  const updateItem = (id: string, updates: Partial<Question>) => {
+    setItems(prev => prev.map(q => q.id === id ? { ...q, ...updates } : q));
+    setDirty(true);
+  };
+
+  const removeItem = (id: string) => {
+    if (!confirm("Delete this logic variable?")) return;
+    setItems(prev => prev.filter(q => q.id !== id));
+    setEditing(null);
+    setDirty(true);
+  };
+
+  const addItem = (name: string, label: string, logicType: string) => {
+    const id = `logic_${Date.now()}`;
+    const newItem: Question = {
+      id, name, displayLabel: label, type: "computed", required: false,
+      defaultValue: null, validation: { logicType, rules: [], defaultValue: "", outputType: "text" },
+      helpText: null, condition: null, groupName: null, displayOrder: 999,
+      isComputed: true, expression: logicType === "formula" ? "" : null,
+    };
+    setItems(prev => [...prev, newItem]);
+    setEditing(id);
+    setAdding(false);
+    setDirty(true);
+  };
+
+  const save = async () => {
+    try {
+      // Merge logic vars back into the full question list and save
+      const nonLogic = questions.filter(q => !q.isComputed && q.type !== "computed");
+      const all = [...nonLogic, ...items].map((q, i) => ({
+        name: q.name, displayLabel: q.displayLabel, type: q.type,
+        required: q.required, defaultValue: q.defaultValue, validation: q.validation,
+        helpText: q.helpText, condition: q.condition, groupName: q.groupName,
+        displayOrder: i, isComputed: q.isComputed || q.type === "computed", expression: q.expression,
+      }));
+      await api.updateVariables(workflowId, all);
+      await onUpdate();
+      setDirty(false);
+      flash("Logic saved");
+    } catch (err: any) { flash("Error: " + err.message); }
+  };
+
+  const editingItem = editing ? items.find(q => q.id === editing) : null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-medium text-gray-700">Logic</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Hidden variables that are computed from interview answers. They never appear in the interview but are available in templates as <code className="bg-gray-100 px-1 rounded">{"{{variable_name}}"}</code>.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setAdding(true)} className="px-3 py-1.5 bg-brand-700 text-white rounded-lg text-sm hover:bg-brand-600">+ Add logic variable</button>
+          {dirty && <button onClick={save} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Save all</button>}
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <Empty
+          title="No logic variables"
+          desc="Create hidden variables computed from answers. Use them for pronouns, fee calculations, conditional text, date math, and more."
+          action="Add your first logic variable"
+          onAction={() => setAdding(true)}
+        />
+      ) : (
+        <div className="flex gap-4" style={{ minHeight: 400 }}>
+          {/* Left: Variable list */}
+          <div className="w-64 shrink-0 bg-white rounded-xl border border-gray-200 overflow-hidden flex flex-col">
+            <div className="p-3 border-b border-gray-100">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Hidden Variables</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+              {items.map(q => {
+                const cfg = (q.validation || {}) as LogicConfig;
+                const isSel = editing === q.id;
+                return (
+                  <button key={q.id} onClick={() => setEditing(q.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${isSel ? "bg-brand-50 ring-1 ring-brand-300" : "hover:bg-gray-50"}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs">{cfg.logicType === "conditional" ? "🔀" : cfg.logicType === "formula" ? "ƒ" : "📋"}</span>
+                      <span className={`text-sm flex-1 truncate ${isSel ? "text-brand-700 font-medium" : "text-gray-700"}`}>{q.displayLabel}</span>
+                    </div>
+                    <span className="text-[9px] text-gray-300 font-mono ml-5">{q.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right: Editor */}
+          <div className="flex-1 bg-white rounded-xl border border-gray-200 p-5 overflow-y-auto">
+            {editingItem ? (
+              <LogicEditor
+                item={editingItem}
+                visibleQuestions={visibleQuestions}
+                allQuestions={questions}
+                onUpdate={(u) => updateItem(editingItem.id, u)}
+                onRemove={() => removeItem(editingItem.id)}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-center">
+                <div>
+                  <p className="text-gray-400">Select a logic variable to edit</p>
+                  <p className="text-xs text-gray-300 mt-1">Or create a new one</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {dirty && <SaveBar onSave={save} />}
+
+      {/* Add modal */}
+      {adding && (
+        <AddLogicModal onAdd={addItem} onClose={() => setAdding(false)} existingNames={items.map(q => q.name)} />
+      )}
+    </div>
+  );
+}
+
+// ── Add Logic Modal ──
+
+function AddLogicModal({ onAdd, onClose, existingNames }: {
+  onAdd: (name: string, label: string, type: string) => void; onClose: () => void; existingNames: string[];
+}) {
+  const [label, setLabel] = useState("");
+  const [name, setName] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
+  const [logicType, setLogicType] = useState("conditional");
+
+  useEffect(() => {
+    if (!nameEdited && label) setName(label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
+  }, [label, nameEdited]);
+
+  const nameTaken = existingNames.includes(name);
+  const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  const TYPES = [
+    { value: "conditional", icon: "🔀", label: "Conditional Rules", desc: "IF gender is Male THEN \"he\", ELSE IF Female THEN \"she\", ELSE \"they\". Visual builder — no coding." },
+    { value: "formula", icon: "ƒ", label: "Formula", desc: "Write expressions: total_shares * price_per_share, add_days(formation_date, 90), upper(company_name). For power users." },
+    { value: "lookup", icon: "📋", label: "Lookup Table", desc: "Map values: state → filing fee. Delaware = $300, California = $800, New York = $200." },
+  ];
+
+  return (
+    <Modal onClose={onClose} title="Add logic variable" subtitle="Create a hidden variable computed from interview answers">
+      <div className="space-y-4 mt-4">
+        <Field label="Label" sub="What this variable represents">
+          <input value={label} onChange={e => setLabel(e.target.value)} className={ic} autoFocus placeholder='e.g., Pronoun, Filing Fee, Total Shares' />
+        </Field>
+        <Field label="Variable name" sub={`Used in templates as {{${name || "variable_name"}}}`}>
+          <input value={name} onChange={e => { setName(e.target.value); setNameEdited(true); }} className={`${ic} font-mono`} />
+          {nameTaken && <p className="text-xs text-red-500 mt-0.5">Already in use</p>}
+        </Field>
+
+        <Field label="Logic type">
+          <div className="space-y-2 mt-1">
+            {TYPES.map(t => (
+              <label key={t.value} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${logicType === t.value ? "border-brand-400 bg-brand-50/30" : "border-gray-200 hover:border-gray-300"}`}>
+                <input type="radio" name="logicType" value={t.value} checked={logicType === t.value} onChange={() => setLogicType(t.value)} className="mt-0.5" />
+                <div>
+                  <span className="text-sm font-medium text-gray-900">{t.icon} {t.label}</span>
+                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{t.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </Field>
+      </div>
+      <div className="flex justify-end gap-2 mt-6">
+        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600">Cancel</button>
+        <button disabled={!label || !name || nameTaken} onClick={() => onAdd(name, label, logicType)}
+          className="px-5 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-40">
+          Create
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Logic Editor (right panel) ──
+
+function LogicEditor({ item, visibleQuestions, allQuestions, onUpdate, onRemove }: {
+  item: Question; visibleQuestions: Question[]; allQuestions: Question[];
+  onUpdate: (u: Partial<Question>) => void; onRemove: () => void;
+}) {
+  const cfg: LogicConfig = (item.validation || { logicType: "conditional" }) as LogicConfig;
+  const setCfg = (updates: Partial<LogicConfig>) => onUpdate({ validation: { ...cfg, ...updates } });
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700">{item.displayLabel}</h3>
+          <p className="text-xs text-gray-400 font-mono">{"{{" + item.name + "}}"}</p>
+        </div>
+        <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-600">Delete</button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Label">
+          <input value={item.displayLabel} onChange={e => onUpdate({ displayLabel: e.target.value })} className={ic} />
+        </Field>
+        <Field label="Variable name">
+          <input value={item.name} onChange={e => onUpdate({ name: e.target.value })} className={`${ic} font-mono text-xs`} />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Logic type">
+          <select value={cfg.logicType} onChange={e => setCfg({ logicType: e.target.value as any })} className={ic}>
+            <option value="conditional">🔀 Conditional Rules</option>
+            <option value="formula">ƒ Formula</option>
+            <option value="lookup">📋 Lookup Table</option>
+          </select>
+        </Field>
+        <Field label="Output type">
+          <select value={cfg.outputType || "text"} onChange={e => setCfg({ outputType: e.target.value })} className={ic}>
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="boolean">True / False</option>
+            <option value="date">Date</option>
+          </select>
+        </Field>
+      </div>
+
+      <div className="border-t border-gray-200 pt-4">
+        {cfg.logicType === "conditional" && (
+          <ConditionalRulesEditor cfg={cfg} setCfg={setCfg} questions={visibleQuestions} />
+        )}
+        {cfg.logicType === "formula" && (
+          <FormulaEditor item={item} cfg={cfg} setCfg={setCfg} onUpdate={onUpdate} questions={visibleQuestions} allQuestions={allQuestions} />
+        )}
+        {cfg.logicType === "lookup" && (
+          <LookupEditor cfg={cfg} setCfg={setCfg} questions={visibleQuestions} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Conditional Rules Editor (visual, no-code) ──
+
+function ConditionalRulesEditor({ cfg, setCfg, questions }: {
+  cfg: LogicConfig; setCfg: (u: Partial<LogicConfig>) => void; questions: Question[];
+}) {
+  const rules = cfg.rules || [];
+
+  const addRule = () => setCfg({ rules: [...rules, { condition: "", value: "" }] });
+  const updateRule = (i: number, u: Partial<LogicRule>) => {
+    const next = [...rules]; next[i] = { ...next[i], ...u }; setCfg({ rules: next });
+  };
+  const removeRule = (i: number) => setCfg({ rules: rules.filter((_, j) => j !== i) });
+  const moveRule = (i: number, dir: -1 | 1) => {
+    const ni = i + dir; if (ni < 0 || ni >= rules.length) return;
+    const next = [...rules]; [next[i], next[ni]] = [next[ni], next[i]]; setCfg({ rules: next });
+  };
+
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-medium text-gray-600">Conditional Rules</p>
+          <p className="text-[10px] text-gray-400">Rules are evaluated top to bottom. First match wins.</p>
+        </div>
+      </div>
+
+      {rules.map((rule, i) => (
+        <div key={i} className="rounded-xl border border-gray-200 p-3 space-y-2 group hover:border-brand-200 transition-colors">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100">
+                <button type="button" onClick={() => moveRule(i, -1)} className="text-[9px] text-gray-400">▲</button>
+                <button type="button" onClick={() => moveRule(i, 1)} className="text-[9px] text-gray-400">▼</button>
+              </div>
+              <span className={`text-xs font-bold ${i === 0 ? "text-blue-600" : "text-amber-600"}`}>
+                {i === 0 ? "IF" : "ELSE IF"}
+              </span>
+            </div>
+            <button type="button" onClick={() => removeRule(i)} className="text-[10px] text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">Remove</button>
+          </div>
+
+          {/* Condition */}
+          <ConditionBuilder condition={rule.condition} questions={questions} onChange={val => updateRule(i, { condition: val })} />
+
+          {/* Output value */}
+          <div className="flex items-center gap-2 pt-1 border-t border-gray-100">
+            <span className="text-xs text-green-600 font-bold shrink-0">THEN →</span>
+            <input value={rule.value} onChange={e => updateRule(i, { value: e.target.value })} className={`${ic} flex-1`} placeholder="Output value" />
+          </div>
+        </div>
+      ))}
+
+      {/* Default / ELSE */}
+      <div className="rounded-xl border border-dashed border-gray-300 p-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-gray-500">ELSE →</span>
+          <input value={cfg.defaultValue || ""} onChange={e => setCfg({ defaultValue: e.target.value })} className={`${ic} flex-1`} placeholder="Default value (when no rules match)" />
+        </div>
+      </div>
+
+      <button type="button" onClick={addRule} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+        + Add {rules.length > 0 ? "ELSE IF" : "IF"} rule
+      </button>
+
+      {/* Preview */}
+      {(rules.length > 0 || cfg.defaultValue) && (
+        <div className="p-3 bg-gray-50 rounded-xl mt-2">
+          <p className="text-[10px] font-medium text-gray-500 mb-1">Reads as:</p>
+          <div className="text-xs text-gray-700 space-y-0.5">
+            {rules.map((r, i) => (
+              <p key={i}><span className="font-bold text-blue-600">{i === 0 ? "IF" : "ELSE IF"}</span> {r.condition ? "conditions met" : "..."} <span className="font-bold text-green-600">→</span> &ldquo;{r.value || "..."}&rdquo;</p>
+            ))}
+            {cfg.defaultValue && <p><span className="font-bold text-gray-500">ELSE</span> <span className="font-bold text-green-600">→</span> &ldquo;{cfg.defaultValue}&rdquo;</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Formula Editor (power user, code) ──
+
+function FormulaEditor({ item, cfg, setCfg, onUpdate, questions, allQuestions }: {
+  item: Question; cfg: LogicConfig; setCfg: (u: Partial<LogicConfig>) => void;
+  onUpdate: (u: Partial<Question>) => void; questions: Question[]; allQuestions: Question[];
+}) {
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1">Formula</p>
+        <p className="text-[10px] text-gray-400 mb-2">Write an expression using variable names, math operators, and functions.</p>
+        <textarea
+          value={item.expression || cfg.formula || ""}
+          onChange={e => { onUpdate({ expression: e.target.value }); setCfg({ formula: e.target.value }); }}
+          className={`${ic} h-28 font-mono text-xs resize-y`}
+          placeholder={'e.g., total_shares * price_per_share\ne.g., upper(company_name)\ne.g., add_days(formation_date, 90)'}
+        />
+      </div>
+
+      {/* Available variables */}
+      <div>
+        <p className="text-[10px] text-gray-500 mb-1">Click a variable to insert:</p>
+        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+          {questions.map(q => (
+            <button key={q.id} type="button" onClick={() => {
+              const cur = item.expression || cfg.formula || "";
+              const updated = cur + (cur ? " " : "") + q.name;
+              onUpdate({ expression: updated });
+              setCfg({ formula: updated });
+            }} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded hover:bg-brand-50 hover:text-brand-600">
+              {q.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Reference card */}
+      <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-1.5">
+        <p className="text-xs text-purple-700 font-medium">Reference</p>
+        <div className="text-[10px] text-purple-600 space-y-1">
+          <p><strong>Math:</strong> <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code> (modulo) — <code>total_shares * price</code></p>
+          <p><strong>Compare:</strong> <code>{">"}</code> <code>{"<"}</code> <code>==</code> <code>!=</code> — <code>shares {">"} 1000 ? "major" : "minor"</code></p>
+          <p><strong>Text:</strong> <code>upper(x)</code> <code>lower(x)</code> <code>trim(x)</code> <code>concat(a, " ", b)</code> <code>left(x, n)</code> <code>right(x, n)</code></p>
+          <p><strong>Math fns:</strong> <code>round(x)</code> <code>floor(x)</code> <code>ceil(x)</code> <code>min(a,b)</code> <code>max(a,b)</code> <code>abs(x)</code> <code>sum(repeating.$.field)</code></p>
+          <p><strong>Date:</strong> <code>days_between(d1, d2)</code> <code>add_days(d, n)</code> <code>add_months(d, n)</code> <code>format_date(d, "MMMM D, YYYY")</code></p>
+          <p><strong>Logic:</strong> <code>if(condition, then, else)</code> — <code>if(state == "DE", "Delaware", state)</code></p>
+          <p><strong>Counts:</strong> <code>count(repeating_item)</code> — number of items in a repeating list</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Lookup Table Editor ──
+
+function LookupEditor({ cfg, setCfg, questions }: {
+  cfg: LogicConfig; setCfg: (u: Partial<LogicConfig>) => void; questions: Question[];
+}) {
+  const table = cfg.lookupTable || {};
+  const entries = Object.entries(table);
+  const [newKey, setNewKey] = useState("");
+  const [newVal, setNewVal] = useState("");
+  const ic = "px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  const addEntry = () => {
+    if (!newKey.trim()) return;
+    setCfg({ lookupTable: { ...table, [newKey.trim()]: newVal } });
+    setNewKey("");
+    setNewVal("");
+  };
+
+  const removeEntry = (key: string) => {
+    const next = { ...table };
+    delete next[key];
+    setCfg({ lookupTable: next });
+  };
+
+  const updateEntry = (oldKey: string, newValue: string) => {
+    setCfg({ lookupTable: { ...table, [oldKey]: newValue } });
+  };
+
+  // Find the source question for the lookup
+  const srcQ = questions.find(q => q.name === cfg.lookupVariable);
+  const srcOptions = srcQ?.validation?.options || [];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-1">Lookup Table</p>
+        <p className="text-[10px] text-gray-400 mb-2">Map values from a question to output values. Example: state → filing fee.</p>
+      </div>
+
+      <Field label="Source variable" sub="The question whose answer is used as the lookup key">
+        <select value={cfg.lookupVariable || ""} onChange={e => setCfg({ lookupVariable: e.target.value })} className={`w-full ${ic}`}>
+          <option value="">Select a question...</option>
+          {questions.map(q => <option key={q.name} value={q.name}>{q.displayLabel || q.name}</option>)}
+        </select>
+      </Field>
+
+      {/* Auto-populate from source options */}
+      {srcOptions.length > 0 && entries.length === 0 && (
+        <button type="button" onClick={() => {
+          const autoTable: Record<string, string> = {};
+          for (const opt of srcOptions) autoTable[opt] = "";
+          setCfg({ lookupTable: autoTable });
+        }} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+          Auto-populate from &ldquo;{srcQ?.displayLabel}&rdquo; options ({srcOptions.length} values)
+        </button>
+      )}
+
+      {/* Table */}
+      {entries.length > 0 && (
+        <div className="rounded-xl border border-gray-200 overflow-hidden">
+          <div className="grid grid-cols-[1fr_1fr_32px] bg-gray-50 px-3 py-1.5 border-b border-gray-200">
+            <span className="text-[10px] font-semibold text-gray-500 uppercase">When value is</span>
+            <span className="text-[10px] font-semibold text-gray-500 uppercase">Output</span>
+            <span />
+          </div>
+          {entries.map(([key, val]) => (
+            <div key={key} className="grid grid-cols-[1fr_1fr_32px] px-3 py-1.5 border-b border-gray-50 items-center group">
+              <span className="text-sm text-gray-700">{key}</span>
+              <input value={val} onChange={e => updateEntry(key, e.target.value)} className={`${ic} text-xs`} placeholder="→ output value" />
+              <button type="button" onClick={() => removeEntry(key)} className="text-red-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 text-center">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add custom entry */}
+      <div className="flex gap-2">
+        <input value={newKey} onChange={e => setNewKey(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addEntry(); } }}
+          className={`flex-1 ${ic}`} placeholder="Key value" />
+        <input value={newVal} onChange={e => setNewVal(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addEntry(); } }}
+          className={`flex-1 ${ic}`} placeholder="→ Output" />
+        <button type="button" onClick={addEntry} disabled={!newKey.trim()} className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 disabled:opacity-30 shrink-0">Add</button>
+      </div>
+
+      {/* Default */}
+      <Field label="Default value" sub="When no lookup key matches">
+        <input value={cfg.defaultValue || ""} onChange={e => setCfg({ defaultValue: e.target.value })} className={`w-full ${ic}`} placeholder="Fallback value" />
+      </Field>
     </div>
   );
 }
