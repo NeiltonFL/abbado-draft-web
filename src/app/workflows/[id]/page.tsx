@@ -1658,18 +1658,23 @@ function SubQuestionBuilder({ parentName, itemLabel, subQuestions, onChange }: {
             return (
               <div key={i} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                 {/* Collapsed row */}
-                <div className={`flex items-center gap-2 px-3 py-2 group cursor-pointer ${isExp ? "bg-brand-50/40" : "hover:bg-gray-50/50"}`} onClick={() => setExpanded(isExp ? null : i)}>
+                <div
+                  className={`flex items-center gap-2 px-3 py-2.5 group transition-colors cursor-pointer ${isExp ? "bg-brand-50/40 border-b border-brand-100" : "hover:bg-gray-50/50"}`}
+                  onClick={() => setExpanded(isExp ? null : i)}
+                >
                   <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
                     <button type="button" onClick={() => move(i, -1)} className="text-[9px] leading-none text-gray-400 hover:text-gray-600">▲</button>
                     <button type="button" onClick={() => move(i, 1)} className="text-[9px] leading-none text-gray-400 hover:text-gray-600">▼</button>
                   </div>
                   <span className="w-5 h-5 bg-gray-100 rounded flex items-center justify-center text-[10px] shrink-0">{ti?.icon || "?"}</span>
-                  <span className="flex-1 text-sm text-gray-900 truncate min-w-0">{sq.label}</span>
-                  {sq.required && <span className="text-[9px] text-red-400">req</span>}
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-gray-900 truncate block">{sq.label}</span>
+                    <span className="text-[9px] text-gray-300 font-mono">{parentName}.$.{sq.field}</span>
+                  </div>
+                  {sq.required && <span className="text-[9px] text-red-400 bg-red-50 px-1 py-0.5 rounded">required</span>}
                   {hasCondition && <span className="text-[9px] bg-amber-50 text-amber-600 px-1 py-0.5 rounded">conditional</span>}
                   <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{ti?.label || sq.type}</span>
-                  <span className="text-[9px] text-gray-300 font-mono shrink-0">.$.{sq.field}</span>
-                  <span className="text-gray-300 text-[10px]">{isExp ? "▾" : "▸"}</span>
+                  <span className={`text-gray-400 text-xs transition-transform ${isExp ? "rotate-90" : ""}`}>▸</span>
                 </div>
 
                 {/* Expanded editor */}
@@ -1785,7 +1790,7 @@ function SubQuestionBuilder({ parentName, itemLabel, subQuestions, onChange }: {
           + Add
         </button>
       </div>
-      <p className="text-[10px] text-brand-400">Type a label and press Enter or click Add. Click any field to expand its editor and add conditions.</p>
+      <p className="text-[10px] text-brand-400">Type a label and press Enter or click Add. <strong>Click any field to expand</strong> — set conditions, help text, and type-specific options.</p>
     </div>
   );
 }
