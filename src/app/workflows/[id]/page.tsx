@@ -1119,37 +1119,73 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
       {templates.length === 0 ? (
         <Empty title="No output documents" desc="Upload your Word templates (.docx). Variables inside them ({{company_name}}) will be auto-detected and filled with interview answers." action="Add your first template" onAction={() => setShowAdd(true)} />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {templates.map((wt: any, i: number) => {
             const vars = (wt.template?.parsedSchema as any)?.variables || [];
+            const docCondition = (wt.variableMapping as any)?.generateCondition || "";
             return (
-              <div key={wt.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-4 group hover:border-brand-200 transition-colors">
-                <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-sm font-bold shrink-0">📄</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{wt.template?.name}</p>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
-                    <span className="uppercase font-medium">{wt.template?.format}</span>
-                    {vars.length > 0 && <span>{vars.length} variables detected</span>}
-                  </div>
-                  {vars.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {vars.slice(0, 8).map((v: any) => (
-                        <span key={v.name} className={`text-[10px] px-1.5 py-0.5 rounded ${questions.some(q => q.name === v.name) ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
-                          {v.name}
-                        </span>
-                      ))}
-                      {vars.length > 8 && <span className="text-[10px] text-gray-400">+{vars.length - 8}</span>}
+              <div key={wt.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden group hover:border-brand-200 transition-colors">
+                <div className="p-4 flex items-start gap-4">
+                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-sm font-bold shrink-0">📄</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-gray-900">{wt.template?.name}</p>
+                      {docCondition && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">conditional</span>}
                     </div>
-                  )}
-                  {vars.length > 0 && (
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      <span className="text-green-600">{vars.filter((v: any) => questions.some(q => q.name === v.name)).length} matched</span>
-                      {" / "}
-                      <span className="text-red-500">{vars.filter((v: any) => !questions.some(q => q.name === v.name)).length} unmatched</span>
-                    </p>
-                  )}
+                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                      <span className="uppercase font-medium">{wt.template?.format}</span>
+                      {vars.length > 0 && <span>{vars.length} variables detected</span>}
+                      {docCondition ? (
+                        <span className="text-amber-600">Only generated when conditions are met</span>
+                      ) : (
+                        <span className="text-green-600">Always generated</span>
+                      )}
+                    </div>
+                    {vars.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {vars.slice(0, 8).map((v: any) => (
+                          <span key={v.name} className={`text-[10px] px-1.5 py-0.5 rounded ${questions.some(q => q.name === v.name) ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+                            {v.name}
+                          </span>
+                        ))}
+                        {vars.length > 8 && <span className="text-[10px] text-gray-400">+{vars.length - 8}</span>}
+                      </div>
+                    )}
+                    {vars.length > 0 && (
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        <span className="text-green-600">{vars.filter((v: any) => questions.some(q => q.name === v.name)).length} matched</span>
+                        {" / "}
+                        <span className="text-red-500">{vars.filter((v: any) => !questions.some(q => q.name === v.name)).length} unmatched</span>
+                      </p>
+                    )}
+                  </div>
+                  <button onClick={() => removeTmpl(wt.id)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">Remove</button>
                 </div>
-                <button onClick={() => removeTmpl(wt.id)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">Remove</button>
+
+                {/* Document Generation Logic */}
+                <div className="px-4 py-3 bg-gray-50/50 border-t border-gray-100">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Document Logic</span>
+                    <span className="text-[10px] text-gray-400">When should this document be generated?</span>
+                  </div>
+                  <ConditionBuilder
+                    condition={docCondition}
+                    questions={questions}
+                    onChange={async (val) => {
+                      try {
+                        const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
+                        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/workflows/${workflowId}/templates/${wt.id}/mapping`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+                          body: JSON.stringify({ variableMapping: { ...(wt.variableMapping || {}), generateCondition: val || undefined } }),
+                        });
+                        await onUpdate();
+                        flash(val ? "Document condition saved" : "Document condition removed — will always generate");
+                      } catch (err: any) { flash("Error: " + err.message); }
+                    }}
+                  />
+                  {!docCondition && <p className="text-[10px] text-gray-300 mt-1">No conditions — this document is always generated. Add a condition to only generate it when certain answers are given.</p>}
+                </div>
               </div>
             );
           })}
@@ -1706,31 +1742,86 @@ function OptionsEditor({ options, onChange, allowOther, onAllowOtherChange, isMu
 // ═══════════════════════════════════════════════════════════
 
 function ConditionBuilder({ condition, questions, onChange }: { condition: string; questions: Question[]; onChange: (v: string) => void }) {
-  const p = parseCond(condition);
-  const set = (varName: string, op: string, val: string) => {
-    if (!varName) { onChange(""); return; }
-    if (op === "truthy") { onChange(varName); return; }
-    if (op === "falsy") { onChange(`!${varName}`); return; }
-    onChange(`${varName} ${op === "eq" ? "==" : op === "neq" ? "!=" : op === "gt" ? ">" : "<"} "${val}"`);
+  // Parse condition: either JSON (multi-condition) or legacy string (single condition)
+  const parsed = parseConditionData(condition);
+
+  const updateConditions = (data: ConditionData) => {
+    if (data.conditions.length === 0) { onChange(""); return; }
+    onChange(JSON.stringify(data));
   };
+
+  const addRule = () => {
+    updateConditions({ ...parsed, conditions: [...parsed.conditions, { variable: "", operator: "eq", value: "" }] });
+  };
+
+  const updateRule = (idx: number, updates: Partial<ConditionRule>) => {
+    const next = [...parsed.conditions];
+    next[idx] = { ...next[idx], ...updates };
+    updateConditions({ ...parsed, conditions: next });
+  };
+
+  const removeRule = (idx: number) => {
+    updateConditions({ ...parsed, conditions: parsed.conditions.filter((_, i) => i !== idx) });
+  };
+
+  const toggleLogic = () => {
+    updateConditions({ ...parsed, logic: parsed.logic === "all" ? "any" : "all" });
+  };
+
+  const ic = "px-2 py-1.5 border border-gray-200 rounded text-xs outline-none focus:ring-1 focus:ring-brand-400";
+
+  if (parsed.conditions.length === 0) {
+    return (
+      <button type="button" onClick={addRule} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+        + Add condition
+      </button>
+    );
+  }
+
   return (
-    <div className="flex gap-2 items-center flex-wrap">
-      <select value={p.v} onChange={e => set(e.target.value, p.o || "eq", p.c)} className="px-2 py-1.5 border border-gray-200 rounded text-xs outline-none flex-1 min-w-[140px]">
-        <option value="">Always show</option>
-        {questions.map(q => <option key={q.name} value={q.name}>{q.displayLabel}</option>)}
-      </select>
-      {p.v && (
-        <>
-          <select value={p.o} onChange={e => set(p.v, e.target.value, p.c)} className="px-2 py-1.5 border border-gray-200 rounded text-xs outline-none">
+    <div className="space-y-2">
+      {parsed.conditions.map((rule, i) => (
+        <div key={i} className="flex gap-1.5 items-center flex-wrap">
+          {i > 0 && (
+            <button type="button" onClick={toggleLogic}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${parsed.logic === "all" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>
+              {parsed.logic === "all" ? "AND" : "OR"}
+            </button>
+          )}
+          <select value={rule.variable} onChange={e => updateRule(i, { variable: e.target.value })} className={`${ic} flex-1 min-w-[130px]`}>
+            <option value="">Select question...</option>
+            {questions.map(q => <option key={q.name} value={q.name}>{q.displayLabel || q.name}</option>)}
+          </select>
+          <select value={rule.operator} onChange={e => updateRule(i, { operator: e.target.value })} className={ic}>
             {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          {!["truthy", "falsy"].includes(p.o) && (
-            <input value={p.c} onChange={e => set(p.v, p.o, e.target.value)} className="px-2 py-1.5 border border-gray-200 rounded text-xs outline-none flex-1 min-w-[100px]" placeholder="value" />
+          {!["truthy", "falsy"].includes(rule.operator) && (
+            <input value={rule.value} onChange={e => updateRule(i, { value: e.target.value })}
+              className={`${ic} flex-1 min-w-[80px]`} placeholder="value" />
           )}
-        </>
-      )}
+          <button type="button" onClick={() => removeRule(i)} className="text-red-300 hover:text-red-500 text-xs px-1">✕</button>
+        </div>
+      ))}
+      <button type="button" onClick={addRule} className="text-[10px] text-brand-500 hover:text-brand-700">+ Add {parsed.conditions.length > 0 ? "another" : ""} condition</button>
     </div>
   );
+}
+
+// Condition data types
+interface ConditionRule { variable: string; operator: string; value: string; }
+interface ConditionData { logic: "all" | "any"; conditions: ConditionRule[]; }
+
+function parseConditionData(c: string): ConditionData {
+  if (!c) return { logic: "all", conditions: [] };
+  // Try JSON first (new multi-condition format)
+  try {
+    const parsed = JSON.parse(c);
+    if (parsed.conditions && Array.isArray(parsed.conditions)) return parsed;
+  } catch {}
+  // Legacy single-condition format
+  const legacy = parseCond(c);
+  if (legacy.v) return { logic: "all", conditions: [{ variable: legacy.v, operator: legacy.o, value: legacy.c }] };
+  return { logic: "all", conditions: [] };
 }
 
 function parseCond(c: string): { v: string; o: string; c: string } {

@@ -68,22 +68,21 @@ export default function InterviewPage() {
     setValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Check if a condition is met (for conditional visibility)
+  // Evaluate a condition (supports both legacy string and new JSON multi-condition format)
   const isVisible = (condition: string | null): boolean => {
     if (!condition) return true;
     try {
-      // Simple condition evaluation: "variable == 'value'" or "variable" (truthy)
-      const match = condition.match(/^(\S+)\s*(==|!=)\s*["']?([^"']*)["']?$/);
-      if (match) {
-        const [, varName, op, compareVal] = match;
-        const actual = String(values[varName] || "");
-        return op === "==" ? actual === compareVal : actual !== compareVal;
+      // Try JSON format first (multi-condition)
+      const parsed = JSON.parse(condition);
+      if (parsed.conditions && Array.isArray(parsed.conditions)) {
+        const results = parsed.conditions.map((rule: any) => evalRule(rule, values));
+        return parsed.logic === "any" ? results.some(Boolean) : results.every(Boolean);
       }
-      // Truthy check
-      return Boolean(values[condition.trim()]);
     } catch {
-      return true;
+      // Legacy single-condition format
+      return evalLegacyCondition(condition, values);
     }
+    return true;
   };
 
   // Save current progress
@@ -100,18 +99,39 @@ export default function InterviewPage() {
     }
   };
 
-  // Navigate sections
+  // Navigate sections (skip pages whose conditions aren't met)
   const goNext = async () => {
     if (!interview) return;
     await saveProgress();
-    if (currentSection < interview.sections.length - 1) {
-      setCurrentSection((s) => s + 1);
+    let next = currentSection + 1;
+    while (next < interview.sections.length) {
+      const sec = interview.sections[next];
+      if (!sec.condition || isVisible(sec.condition)) break;
+      next++;
     }
+    if (next < interview.sections.length) setCurrentSection(next);
   };
 
   const goBack = () => {
-    if (currentSection > 0) setCurrentSection((s) => s - 1);
+    if (!interview) return;
+    let prev = currentSection - 1;
+    while (prev >= 0) {
+      const sec = interview.sections[prev];
+      if (!sec.condition || isVisible(sec.condition)) break;
+      prev--;
+    }
+    if (prev >= 0) setCurrentSection(prev);
   };
+
+  // Find if we're on the last visible section
+  const isLastVisible = (() => {
+    if (!interview) return true;
+    for (let i = currentSection + 1; i < interview.sections.length; i++) {
+      const sec = interview.sections[i];
+      if (!sec.condition || isVisible(sec.condition)) return false;
+    }
+    return true;
+  })();
 
   // Generate documents
   const handleGenerate = async () => {
@@ -131,7 +151,7 @@ export default function InterviewPage() {
   if (!interview || !matter) return <AppShell><p className="text-gray-400">Not found</p></AppShell>;
 
   const section = interview.sections[currentSection];
-  const isLastSection = currentSection === interview.sections.length - 1;
+  const isLastSection = isLastVisible;
   const visibleVars = section?.variables.filter((v) => !v.isComputed && isVisible(v.condition)) || [];
 
   return (
@@ -145,20 +165,24 @@ export default function InterviewPage() {
 
         {/* Progress bar */}
         <div className="flex items-center gap-2 mb-8">
-          {interview.sections.map((s, i) => (
-            <div key={s.id} className="flex-1">
-              <div
-                className={`h-1.5 rounded-full transition-colors ${
-                  i < currentSection ? "bg-brand-500" :
-                  i === currentSection ? "bg-brand-500" :
-                  "bg-gray-200"
-                }`}
-              />
-              <p className={`text-xs mt-1.5 ${i === currentSection ? "text-brand-700 font-medium" : "text-gray-400"}`}>
-                {s.name}
-              </p>
-            </div>
-          ))}
+          {interview.sections.map((s, i) => {
+            const sectionVisible = !s.condition || isVisible(s.condition);
+            return (
+              <div key={s.id} className={`flex-1 ${!sectionVisible ? "opacity-30" : ""}`}>
+                <div
+                  className={`h-1.5 rounded-full transition-colors ${
+                    !sectionVisible ? "bg-gray-200 border border-dashed border-gray-300" :
+                    i < currentSection ? "bg-brand-500" :
+                    i === currentSection ? "bg-brand-500" :
+                    "bg-gray-200"
+                  }`}
+                />
+                <p className={`text-xs mt-1.5 ${!sectionVisible ? "text-gray-300 line-through" : i === currentSection ? "text-brand-700 font-medium" : "text-gray-400"}`}>
+                  {s.name}
+                </p>
+              </div>
+            );
+          })}
         </div>
 
         {/* Section */}
@@ -354,4 +378,39 @@ function VariableField({ variable, value, onChange }: { variable: Variable; valu
         </div>
       );
   }
+}
+
+// ── Condition evaluation helpers ──
+
+function evalRule(rule: { variable: string; operator: string; value: string }, values: Record<string, any>): boolean {
+  const actual = values[rule.variable];
+  const actualStr = String(actual ?? "");
+
+  switch (rule.operator) {
+    case "eq": return actualStr === rule.value;
+    case "neq": return actualStr !== rule.value;
+    case "gt": return Number(actual) > Number(rule.value);
+    case "lt": return Number(actual) < Number(rule.value);
+    case "truthy": return Boolean(actual) && actual !== "false" && actual !== "0" && actualStr !== "";
+    case "falsy": return !actual || actual === "false" || actual === "0" || actualStr === "";
+    default: return true;
+  }
+}
+
+function evalLegacyCondition(condition: string, values: Record<string, any>): boolean {
+  const match = condition.match(/^(\S+)\s*(==|!=|>|<)\s*["']?([^"']*)["']?$/);
+  if (match) {
+    const [, varName, op, compareVal] = match;
+    const actual = String(values[varName] || "");
+    if (op === "==") return actual === compareVal;
+    if (op === "!=") return actual !== compareVal;
+    if (op === ">") return Number(values[varName]) > Number(compareVal);
+    if (op === "<") return Number(values[varName]) < Number(compareVal);
+  }
+  if (condition.startsWith("!")) {
+    const v = values[condition.slice(1)];
+    return !v || v === "false" || v === "0" || String(v) === "";
+  }
+  const v = values[condition.trim()];
+  return Boolean(v) && v !== "false" && v !== "0" && String(v) !== "";
 }
