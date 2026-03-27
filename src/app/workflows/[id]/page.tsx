@@ -7,48 +7,66 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 // ═══════════════════════════════════════════════════════════
-// CONSTANTS
+// TYPES & CONSTANTS
 // ═══════════════════════════════════════════════════════════
 
-const VAR_TYPES: { value: string; label: string; icon: string; description: string }[] = [
-  { value: "text", label: "Text", icon: "Aa", description: "Single-line text input" },
-  { value: "rich_text", label: "Rich Text", icon: "¶", description: "Multi-line formatted text" },
-  { value: "number", label: "Number", icon: "#", description: "Integer or decimal value" },
-  { value: "currency", label: "Currency", icon: "$", description: "Dollar amount with formatting" },
-  { value: "date", label: "Date", icon: "📅", description: "Calendar date picker" },
-  { value: "boolean", label: "Yes / No", icon: "◉", description: "True/false toggle" },
-  { value: "dropdown", label: "Dropdown", icon: "▾", description: "Select from predefined options" },
-  { value: "multi_select", label: "Multi Select", icon: "☐", description: "Select multiple options" },
-  { value: "email", label: "Email", icon: "@", description: "Email address with validation" },
-  { value: "phone", label: "Phone", icon: "☎", description: "Phone number with formatting" },
-  { value: "address", label: "Address", icon: "⌂", description: "Full address (street, city, state, zip)" },
-  { value: "state", label: "US State", icon: "🗺", description: "US state dropdown" },
-  { value: "percent", label: "Percentage", icon: "%", description: "Percentage value" },
-  { value: "url", label: "URL", icon: "🔗", description: "Web address" },
-  { value: "computed", label: "Computed", icon: "ƒ", description: "Calculated from other variables" },
+interface Question {
+  id: string;
+  name: string;
+  displayLabel: string;
+  type: string;
+  required: boolean;
+  defaultValue: string | null;
+  validation: any;
+  helpText: string | null;
+  condition: string | null;
+  groupName: string | null; // maps to a Page
+  displayOrder: number;
+  isComputed: boolean;
+  expression: string | null;
+  // Client-side only
+  _isNew?: boolean;
+  _isRepeating?: boolean;
+  _repeatItemLabel?: string;
+  _subQuestions?: Question[];
+}
+
+interface Page {
+  id: string;
+  name: string;
+  description: string | null;
+  displayOrder: number;
+  condition: string | null;
+}
+
+const QUESTION_TYPES = [
+  { value: "text", label: "Short Text", icon: "Aa", desc: "Single-line text" },
+  { value: "rich_text", label: "Long Text", icon: "¶", desc: "Multi-line paragraph" },
+  { value: "number", label: "Number", icon: "#", desc: "Integer or decimal" },
+  { value: "currency", label: "Currency", icon: "$", desc: "Dollar amount" },
+  { value: "percent", label: "Percentage", icon: "%", desc: "Percent value" },
+  { value: "date", label: "Date", icon: "📅", desc: "Date picker" },
+  { value: "boolean", label: "Yes / No", icon: "◉", desc: "Toggle choice" },
+  { value: "dropdown", label: "Single Choice", icon: "▾", desc: "Pick one option" },
+  { value: "multi_select", label: "Multiple Choice", icon: "☐", desc: "Pick many options" },
+  { value: "email", label: "Email", icon: "@", desc: "Email address" },
+  { value: "phone", label: "Phone", icon: "☎", desc: "Phone number" },
+  { value: "address", label: "Address", icon: "⌂", desc: "Full mailing address" },
+  { value: "state", label: "US State", icon: "🏛", desc: "State dropdown" },
+  { value: "url", label: "Website", icon: "🔗", desc: "Web URL" },
+  { value: "file_upload", label: "File Upload", icon: "📎", desc: "Upload a document" },
+  { value: "info", label: "Info Block", icon: "ℹ", desc: "Display-only text (no input)" },
+  { value: "repeating", label: "Repeating Item", icon: "↻", desc: "Collect a list (e.g. founders, assets)" },
+  { value: "computed", label: "Calculation", icon: "ƒ", desc: "Auto-computed from other answers" },
 ];
 
 const OPERATORS = [
-  { value: "eq", label: "equals" },
-  { value: "neq", label: "does not equal" },
-  { value: "gt", label: "is greater than" },
-  { value: "lt", label: "is less than" },
-  { value: "gte", label: "is at least" },
-  { value: "lte", label: "is at most" },
-  { value: "contains", label: "contains" },
-  { value: "empty", label: "is empty" },
-  { value: "not_empty", label: "is not empty" },
-  { value: "truthy", label: "is true" },
-  { value: "falsy", label: "is false" },
-];
-
-const US_STATES = [
-  "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia",
-  "Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland",
-  "Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey",
-  "New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina",
-  "South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming",
-  "District of Columbia","Puerto Rico","Guam","US Virgin Islands",
+  { value: "eq", label: "equals", symbol: "==" },
+  { value: "neq", label: "does not equal", symbol: "!=" },
+  { value: "gt", label: "greater than", symbol: ">" },
+  { value: "lt", label: "less than", symbol: "<" },
+  { value: "truthy", label: "is answered", symbol: "" },
+  { value: "falsy", label: "is not answered", symbol: "!" },
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -61,229 +79,621 @@ export default function WorkflowBuilderPage() {
   const [workflow, setWorkflow] = useState<any>(null);
   const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"templates" | "variables" | "interview" | "logic">("templates");
-  const [saveStatus, setSaveStatus] = useState<string>("");
+  const [tab, setTab] = useState<string>("questions");
+  const [saveMsg, setSaveMsg] = useState("");
 
   const reload = useCallback(async () => {
-    const [w, t] = await Promise.all([
-      api.getWorkflow(workflowId),
-      api.getTemplates(),
-    ]);
+    const [w, t] = await Promise.all([api.getWorkflow(workflowId), api.getTemplates()]);
     setWorkflow(w);
     setAllTemplates(t);
   }, [workflowId]);
 
-  useEffect(() => {
-    reload().catch(console.error).finally(() => setLoading(false));
-  }, [reload]);
+  useEffect(() => { reload().catch(console.error).finally(() => setLoading(false)); }, [reload]);
 
-  if (loading) return <AppShell><div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading workflow builder...</p></div></AppShell>;
-  if (!workflow) return <AppShell><div className="text-center py-12"><p className="text-gray-500">Workflow not found</p><Link href="/workflows" className="text-sm text-brand-500 mt-2 inline-block">Back to workflows</Link></div></AppShell>;
+  if (loading) return <AppShell><div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading...</p></div></AppShell>;
+  if (!workflow) return <AppShell><p className="text-gray-500">Workflow not found</p></AppShell>;
 
+  const questions: Question[] = workflow.variables || [];
+  const pages: Page[] = workflow.interviewSections || [];
   const templates = workflow.templates || [];
-  const variables: any[] = workflow.variables || [];
-  const sections = workflow.interviewSections || [];
+
+  const flash = (msg: string) => { setSaveMsg(msg); setTimeout(() => setSaveMsg(""), 2500); };
+
+  const TABS = [
+    { key: "questions", label: "Questions", count: questions.length },
+    { key: "pages", label: "Pages", count: pages.length },
+    { key: "documents", label: "Output Documents", count: templates.length },
+    { key: "preview", label: "Preview" },
+  ];
 
   return (
     <AppShell>
       <div className="max-w-6xl">
         {/* Header */}
-        <div className="flex items-start justify-between mb-5">
+        <div className="flex items-start justify-between mb-4">
           <div>
-            <div className="flex items-center gap-2">
-              <Link href="/workflows" className="text-xs text-gray-400 hover:text-gray-600">← Workflows</Link>
-              {workflow.category && <span className="text-xs px-2 py-0.5 bg-brand-50 text-brand-600 rounded-full">{workflow.category}</span>}
-            </div>
+            <Link href="/workflows" className="text-xs text-gray-400 hover:text-gray-600">← Workflows</Link>
             <h1 className="text-xl font-semibold text-gray-900 mt-1">{workflow.name}</h1>
             {workflow.description && <p className="text-sm text-gray-500 mt-0.5">{workflow.description}</p>}
           </div>
           <div className="flex items-center gap-2">
-            {saveStatus === "saving" && <span className="text-xs text-amber-500">Saving...</span>}
-            {saveStatus === "saved" && <span className="text-xs text-green-500">Saved</span>}
-            {saveStatus === "error" && <span className="text-xs text-red-500">Save failed</span>}
+            {saveMsg && <span className={`text-xs ${saveMsg.includes("Error") ? "text-red-500" : "text-green-500"}`}>{saveMsg}</span>}
             <Link href={`/matters?workflowId=${workflowId}`} className="px-4 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600">
-              New matter
+              Run this workflow
             </Link>
           </div>
         </div>
 
-        {/* Build stats */}
-        <div className="flex items-center gap-6 mb-5 text-xs text-gray-400">
-          <span>{templates.length} template{templates.length !== 1 ? "s" : ""}</span>
-          <span>{variables.length} variable{variables.length !== 1 ? "s" : ""}</span>
-          <span>{sections.length} interview step{sections.length !== 1 ? "s" : ""}</span>
-          <span>{variables.filter((v: any) => v.condition).length} conditional field{variables.filter((v: any) => v.condition).length !== 1 ? "s" : ""}</span>
-          <span>{variables.filter((v: any) => v.isComputed).length} computed field{variables.filter((v: any) => v.isComputed).length !== 1 ? "s" : ""}</span>
+        {/* Stats */}
+        <div className="flex gap-4 mb-5 text-xs">
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.length} question{questions.length !== 1 ? "s" : ""}</span>
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{pages.length} page{pages.length !== 1 ? "s" : ""}</span>
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{templates.length} document{templates.length !== 1 ? "s" : ""}</span>
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.filter(q => q.condition).length} with logic</span>
+          <span className="bg-white border border-gray-200 rounded-lg px-3 py-1.5">{questions.filter(q => q.isComputed).length} calculations</span>
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5 mb-6 w-fit">
-          {([
-            { key: "templates", label: "Templates", count: templates.length },
-            { key: "variables", label: "Variables", count: variables.length },
-            { key: "interview", label: "Interview", count: sections.length },
-            { key: "logic", label: "Logic & Conditions", count: variables.filter((v: any) => v.condition || v.isComputed).length },
-          ] as const).map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-sm rounded-md transition-all ${
-                tab === t.key
-                  ? "bg-white text-gray-900 font-medium shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}
-            >
+        <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5 mb-6 w-fit">
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`px-4 py-2 text-sm rounded-md transition-all ${tab === t.key ? "bg-white text-gray-900 font-medium shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
               {t.label}
-              {t.count > 0 && <span className="ml-1.5 text-xs opacity-50">{t.count}</span>}
+              {t.count !== undefined && t.count > 0 && <span className="ml-1.5 text-[10px] opacity-50">{t.count}</span>}
             </button>
           ))}
         </div>
 
-        {/* Tab Content */}
-        {tab === "templates" && <TemplatesBuilder workflowId={workflowId} workflowTemplates={templates} allTemplates={allTemplates} onUpdate={reload} />}
-        {tab === "variables" && <VariablesBuilder workflowId={workflowId} variables={variables} onUpdate={reload} setSaveStatus={setSaveStatus} />}
-        {tab === "interview" && <InterviewBuilder workflowId={workflowId} sections={sections} variables={variables} onUpdate={reload} setSaveStatus={setSaveStatus} />}
-        {tab === "logic" && <LogicBuilder variables={variables} />}
+        {tab === "questions" && <QuestionsTab workflowId={workflowId} questions={questions} pages={pages} onUpdate={reload} flash={flash} />}
+        {tab === "pages" && <PagesTab workflowId={workflowId} pages={pages} questions={questions} onUpdate={reload} flash={flash} />}
+        {tab === "documents" && <DocumentsTab workflowId={workflowId} templates={templates} allTemplates={allTemplates} questions={questions} onUpdate={reload} flash={flash} />}
+        {tab === "preview" && <PreviewTab pages={pages} questions={questions} />}
       </div>
     </AppShell>
   );
 }
 
 // ═══════════════════════════════════════════════════════════
-// TEMPLATES BUILDER
+// QUESTIONS TAB
 // ═══════════════════════════════════════════════════════════
 
-function TemplatesBuilder({ workflowId, workflowTemplates, allTemplates, onUpdate }: {
-  workflowId: string; workflowTemplates: any[]; allTemplates: any[]; onUpdate: () => Promise<void>;
+function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
+  workflowId: string; questions: Question[]; pages: Page[]; onUpdate: () => Promise<void>; flash: (m: string) => void;
 }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [parseResult, setParseResult] = useState<any>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [items, setItems] = useState<Question[]>(questions);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
-  const availableTemplates = allTemplates.filter(t => !workflowTemplates.some(wt => wt.template?.id === t.id));
+  useEffect(() => { setItems(questions); setDirty(false); }, [questions]);
 
-  const handleUploadNew = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setParseResult(null);
-    try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const base64 = btoa(binary);
+  const pageNames = pages.map(p => p.name);
+  const groups = groupBy(items, q => q.groupName || "Unassigned");
 
-      const ext = file.name.split(".").pop()?.toLowerCase() || "docx";
-      const template = await api.createTemplate({ name: file.name.replace(/\.[^.]+$/, ""), format: ext });
-      const result = await api.parseTemplate(base64, file.name, template.id);
-      await api.addTemplateToWorkflow(workflowId, template.id, workflowTemplates.length + 1);
-      setParseResult(result);
-      setShowAdd(false);
-      await onUpdate();
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
+  const add = (q: Question) => { setItems(p => [...p, q]); setDirty(true); setAdding(false); setEditing(q.id); };
+  const update = (id: string, u: Partial<Question>) => { setItems(p => p.map(q => q.id === id ? { ...q, ...u } : q)); setDirty(true); };
+  const remove = (id: string) => { if (!confirm("Delete this question?")) return; setItems(p => p.filter(q => q.id !== id)); setEditing(null); setDirty(true); };
+  const move = (id: string, dir: -1 | 1) => {
+    setItems(p => {
+      const idx = p.findIndex(q => q.id === id);
+      const ni = idx + dir;
+      if (ni < 0 || ni >= p.length) return p;
+      const n = [...p]; [n[idx], n[ni]] = [n[ni], n[idx]]; return n;
+    });
+    setDirty(true);
+  };
+  const duplicate = (id: string) => {
+    const src = items.find(q => q.id === id);
+    if (!src) return;
+    const copy = { ...src, id: `new_${Date.now()}`, name: src.name + "_copy", displayLabel: src.displayLabel + " (copy)", _isNew: true };
+    setItems(p => { const idx = p.findIndex(q => q.id === id); return [...p.slice(0, idx + 1), copy, ...p.slice(idx + 1)]; });
+    setDirty(true);
   };
 
-  const handleAddExisting = async (templateId: string) => {
+  const save = async () => {
     try {
-      await api.addTemplateToWorkflow(workflowId, templateId, workflowTemplates.length + 1);
-      setShowAdd(false);
+      await api.updateVariables(workflowId, items.map((q, i) => ({
+        name: q.name, displayLabel: q.displayLabel, type: q.type === "repeating" || q.type === "info" || q.type === "file_upload" || q.type === "computed" ? "text" : q.type,
+        required: q.required, defaultValue: q.defaultValue, validation: q.validation,
+        helpText: q.helpText, condition: q.condition, groupName: q.groupName,
+        displayOrder: i, isComputed: q.type === "computed" || q.isComputed, expression: q.expression,
+      })));
       await onUpdate();
-    } catch (err: any) { alert(err.message); }
+      setDirty(false);
+      flash("Questions saved");
+    } catch (err: any) { flash("Error: " + err.message); }
   };
 
-  const handleRemove = async (wtId: string) => {
-    if (!confirm("Remove this template from the workflow?")) return;
+  const ti = (type: string) => QUESTION_TYPES.find(t => t.value === type);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-medium text-gray-700">Questions</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Questions collect data from the user. Assign each question to a <strong>Page</strong> to control which step it appears on.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setAdding(true)} className="px-3 py-1.5 bg-brand-700 text-white rounded-lg text-sm hover:bg-brand-600">+ Add question</button>
+          {dirty && <button onClick={save} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Save all</button>}
+        </div>
+      </div>
+
+      {items.length === 0 ? (
+        <Empty title="No questions yet" desc="Questions are the fields your users fill in. Each answer feeds into your document templates." action="Add your first question" onAction={() => setAdding(true)} />
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(groups).map(([pageName, qs]) => (
+            <div key={pageName}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{pageName}</span>
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-xs text-gray-400">{qs.length}</span>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-50 overflow-hidden">
+                {qs.map((q) => (
+                  <QuestionRow key={q.id} q={q} ti={ti} isEditing={editing === q.id}
+                    onToggle={() => setEditing(editing === q.id ? null : q.id)}
+                    onUpdate={(u) => update(q.id, u)} onRemove={() => remove(q.id)}
+                    onMove={(d) => move(q.id, d)} onDuplicate={() => duplicate(q.id)}
+                    allQuestions={items} pageNames={pageNames} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {dirty && <SaveBar onSave={save} />}
+      {adding && <AddQuestionModal onAdd={add} onClose={() => setAdding(false)} pageNames={pageNames} allQuestions={items} />}
+    </div>
+  );
+}
+
+// ── Question Row ──
+
+function QuestionRow({ q, ti, isEditing, onToggle, onUpdate, onRemove, onMove, onDuplicate, allQuestions, pageNames }: {
+  q: Question; ti: (t: string) => any; isEditing: boolean;
+  onToggle: () => void; onUpdate: (u: Partial<Question>) => void; onRemove: () => void;
+  onMove: (d: -1 | 1) => void; onDuplicate: () => void;
+  allQuestions: Question[]; pageNames: string[];
+}) {
+  const typeInfo = ti(q.type);
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none";
+
+  return (
+    <div>
+      {/* Collapsed */}
+      <div className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50/50 transition-colors ${isEditing ? "bg-brand-50/30" : ""}`} onClick={onToggle}>
+        <div className="flex flex-col gap-px opacity-30 hover:opacity-100" onClick={e => { e.stopPropagation(); }}>
+          <button onClick={() => onMove(-1)} className="text-[10px] leading-none">▲</button>
+          <button onClick={() => onMove(1)} className="text-[10px] leading-none">▼</button>
+        </div>
+        <div className="w-7 h-7 bg-gray-100 rounded flex items-center justify-center text-xs shrink-0" title={typeInfo?.label}>{typeInfo?.icon || "?"}</div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-900 truncate">{q.displayLabel || q.name}</span>
+            {q.required && <span className="text-red-400 text-[10px]">required</span>}
+            {q.condition && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">conditional</span>}
+            {q.isComputed && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">computed</span>}
+          </div>
+          <p className="text-xs text-gray-400 font-mono truncate">{q.name}</p>
+        </div>
+        <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{typeInfo?.label || q.type}</span>
+        <span className="text-gray-300 text-xs">{isEditing ? "▾" : "▸"}</span>
+      </div>
+
+      {/* Expanded editor */}
+      {isEditing && (
+        <div className="px-4 py-5 bg-gray-50/80 border-t border-gray-100 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            {/* Left: Identity */}
+            <div className="space-y-3">
+              <Field label="Question label" sub="What the user sees">
+                <input value={q.displayLabel} onChange={e => onUpdate({ displayLabel: e.target.value })} className={ic} placeholder="e.g., What is the company's legal name?" />
+              </Field>
+              <Field label="Variable name" sub="Used in templates as {{name}}">
+                <input value={q.name} onChange={e => onUpdate({ name: e.target.value })} className={`${ic} font-mono text-xs`} />
+              </Field>
+              <Field label="Type">
+                <select value={q.type} onChange={e => onUpdate({ type: e.target.value })} className={ic}>
+                  {QUESTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label} — {t.desc}</option>)}
+                </select>
+              </Field>
+              <Field label="Page" sub="Which interview step this appears on">
+                <input value={q.groupName || ""} onChange={e => onUpdate({ groupName: e.target.value || null })} list={`pages-${q.id}`} className={ic} placeholder="e.g., Company Information" />
+                <datalist id={`pages-${q.id}`}>{pageNames.map(p => <option key={p} value={p} />)}</datalist>
+              </Field>
+            </div>
+
+            {/* Right: Config + Logic */}
+            <div className="space-y-3">
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={q.required} onChange={e => onUpdate({ required: e.target.checked })} className="rounded border-gray-300" />
+                  Required
+                </label>
+              </div>
+              <Field label="Help text" sub="Guidance shown below the question">
+                <input value={q.helpText || ""} onChange={e => onUpdate({ helpText: e.target.value || null })} className={ic} placeholder="e.g., Must match your Certificate of Incorporation exactly" />
+              </Field>
+              <Field label="Default value">
+                <input value={q.defaultValue || ""} onChange={e => onUpdate({ defaultValue: e.target.value || null })} className={ic} placeholder="Pre-filled answer" />
+              </Field>
+
+              {/* Type-specific config */}
+              {(q.type === "dropdown" || q.type === "multi_select") && (
+                <Field label="Options" sub="One per line">
+                  <textarea value={(q.validation?.options || []).join("\n")} onChange={e => onUpdate({ validation: { ...q.validation, options: e.target.value.split("\n").filter(Boolean) } })} className={`${ic} h-24 resize-y`} placeholder={"Option A\nOption B\nOption C"} />
+                </Field>
+              )}
+              {q.type === "number" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Min"><input type="number" value={q.validation?.min ?? ""} onChange={e => onUpdate({ validation: { ...q.validation, min: e.target.value ? Number(e.target.value) : undefined } })} className={ic} /></Field>
+                  <Field label="Max"><input type="number" value={q.validation?.max ?? ""} onChange={e => onUpdate({ validation: { ...q.validation, max: e.target.value ? Number(e.target.value) : undefined } })} className={ic} /></Field>
+                </div>
+              )}
+              {q.type === "text" && (
+                <Field label="Max characters"><input type="number" value={q.validation?.maxLength ?? ""} onChange={e => onUpdate({ validation: { ...q.validation, maxLength: e.target.value ? Number(e.target.value) : undefined } })} className={ic} placeholder="No limit" /></Field>
+              )}
+              {(q.type === "computed" || q.isComputed) && (
+                <Field label="Calculation formula" sub="e.g., total_shares * percent / 100">
+                  <textarea value={q.expression || ""} onChange={e => onUpdate({ expression: e.target.value })} className={`${ic} h-16 font-mono text-xs resize-y`} placeholder="authorized_shares - esop_shares" />
+                </Field>
+              )}
+              {q.type === "repeating" && (
+                <Field label="Item label" sub="What each item is called (e.g., 'Founder', 'Asset')">
+                  <input value={q.validation?.itemLabel || ""} onChange={e => onUpdate({ validation: { ...q.validation, itemLabel: e.target.value } })} className={ic} placeholder="e.g., Founder" />
+                </Field>
+              )}
+              {q.type === "info" && (
+                <Field label="Display text" sub="Rich text shown to the user (no input collected)">
+                  <textarea value={q.defaultValue || ""} onChange={e => onUpdate({ defaultValue: e.target.value })} className={`${ic} h-20 resize-y`} placeholder="Information or instructions for the user..." />
+                </Field>
+              )}
+            </div>
+          </div>
+
+          {/* Question Logic */}
+          <div className="pt-3 border-t border-gray-200">
+            <Field label="Question logic" sub="Only show this question when a condition is met">
+              <ConditionBuilder condition={q.condition || ""} questions={allQuestions.filter(aq => aq.id !== q.id)} onChange={val => onUpdate({ condition: val || null })} />
+            </Field>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-3 border-t border-gray-200">
+            <button onClick={onDuplicate} className="text-xs text-gray-400 hover:text-gray-600">Duplicate</button>
+            <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-600">Delete question</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// ADD QUESTION MODAL
+// ═══════════════════════════════════════════════════════════
+
+function AddQuestionModal({ onAdd, onClose, pageNames, allQuestions }: {
+  onAdd: (q: Question) => void; onClose: () => void; pageNames: string[]; allQuestions: Question[];
+}) {
+  const [step, setStep] = useState<"type" | "config">("type");
+  const [type, setType] = useState("");
+  const [label, setLabel] = useState("");
+  const [name, setName] = useState("");
+  const [nameEdited, setNameEdited] = useState(false);
+  const [page, setPage] = useState(pageNames[0] || "");
+  const [required, setRequired] = useState(false);
+
+  useEffect(() => {
+    if (!nameEdited && label) setName(label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
+  }, [label, nameEdited]);
+
+  const nameTaken = allQuestions.some(q => q.name === name);
+  const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none";
+
+  if (step === "type") {
+    return (
+      <Modal onClose={onClose} title="Add a question" subtitle="Choose the type of data you want to collect">
+        <div className="grid grid-cols-3 gap-2 mt-2">
+          {QUESTION_TYPES.map(t => (
+            <button key={t.value} onClick={() => { setType(t.value); setStep("config"); }}
+              className="p-3 rounded-xl border border-gray-200 hover:border-brand-400 hover:bg-brand-50/30 text-left transition-all group">
+              <span className="text-lg block">{t.icon}</span>
+              <span className="text-sm font-medium text-gray-900 block mt-1">{t.label}</span>
+              <span className="text-[10px] text-gray-400 block mt-0.5 leading-tight">{t.desc}</span>
+            </button>
+          ))}
+        </div>
+      </Modal>
+    );
+  }
+
+  const typeInfo = QUESTION_TYPES.find(t => t.value === type)!;
+
+  return (
+    <Modal onClose={onClose} title={`New ${typeInfo.label} question`} subtitle={typeInfo.desc}>
+      <div className="space-y-4 mt-3">
+        <Field label="Question label" sub="What the user sees in the interview">
+          <input value={label} onChange={e => setLabel(e.target.value)} className={ic} autoFocus placeholder={
+            type === "text" ? "What is the company's legal name?" :
+            type === "boolean" ? "Will shares vest?" :
+            type === "dropdown" ? "What type of entity is this?" :
+            type === "date" ? "When should the entity be formed?" :
+            type === "repeating" ? "Add a founder" :
+            "Enter your question..."
+          } />
+        </Field>
+        <Field label="Variable name" sub={`Used in templates as {{${name || "variable_name"}}}`}>
+          <input value={name} onChange={e => { setName(e.target.value); setNameEdited(true); }} className={`${ic} font-mono`} />
+          {nameTaken && <p className="text-xs text-red-500 mt-0.5">Already in use</p>}
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Page">
+            <input value={page} onChange={e => setPage(e.target.value)} list="add-q-pages" className={ic} placeholder="e.g., Company Info" />
+            <datalist id="add-q-pages">{pageNames.map(p => <option key={p} value={p} />)}</datalist>
+          </Field>
+          <div className="flex items-end pb-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} className="rounded border-gray-300" />
+              Required
+            </label>
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-between mt-6">
+        <button onClick={() => setStep("type")} className="text-sm text-gray-500 hover:text-gray-700">← Change type</button>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600">Cancel</button>
+          <button disabled={!label || !name || nameTaken} onClick={() => onAdd({
+            id: `new_${Date.now()}`, name, displayLabel: label, type, required,
+            defaultValue: null, validation: null, helpText: null, condition: null,
+            groupName: page || null, displayOrder: allQuestions.length, isComputed: type === "computed",
+            expression: null, _isNew: true,
+          })} className="px-5 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-40">
+            Add question
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// PAGES TAB
+// ═══════════════════════════════════════════════════════════
+
+function PagesTab({ workflowId, pages, questions, onUpdate, flash }: {
+  workflowId: string; pages: Page[]; questions: Question[]; onUpdate: () => Promise<void>; flash: (m: string) => void;
+}) {
+  const [items, setItems] = useState(pages);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => { setItems(pages); setDirty(false); }, [pages]);
+
+  const questionGroups = Array.from(new Set(questions.map(q => q.groupName).filter(Boolean))) as string[];
+  const uncovered = questionGroups.filter(g => !items.some(p => p.name === g));
+
+  const add = (name: string) => { setItems(p => [...p, { id: `new_${Date.now()}`, name, description: null, displayOrder: p.length, condition: null }]); setDirty(true); };
+  const update = (i: number, u: Partial<Page>) => { setItems(p => { const n = [...p]; n[i] = { ...n[i], ...u }; return n; }); setDirty(true); };
+  const remove = (i: number) => { setItems(p => p.filter((_, j) => j !== i)); setDirty(true); };
+  const move = (i: number, d: -1 | 1) => { const ni = i + d; if (ni < 0 || ni >= items.length) return; setItems(p => { const n = [...p]; [n[i], n[ni]] = [n[ni], n[i]]; return n; }); setDirty(true); };
+
+  const autoGen = () => { setItems(questionGroups.map((g, i) => ({ id: `auto_${Date.now()}_${i}`, name: g, description: null, displayOrder: i, condition: null }))); setDirty(true); };
+
+  const save = async () => {
     try {
-      await api.removeTemplateFromWorkflow(workflowId, wtId);
-      await onUpdate();
-    } catch (err: any) { alert(err.message); }
+      const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/workflows/${workflowId}/interview`, {
+        method: "PUT", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ sections: items.map((s, i) => ({ name: s.name, description: s.description, displayOrder: i, condition: s.condition })) }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      await onUpdate(); setDirty(false); flash("Pages saved");
+    } catch (err: any) { flash("Error: " + err.message); }
   };
 
   return (
     <div>
-      {/* Parse result banner */}
-      {parseResult && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 flex items-start justify-between">
-          <div>
-            <p className="text-sm font-medium text-green-800">Template parsed — {parseResult.summary.totalVariables} variables detected</p>
-            <p className="text-xs text-green-600 mt-1">
-              {parseResult.summary.sdtVariables} content controls, {parseResult.summary.mustacheVariables} mustache variables,
-              {" "}{parseResult.summary.conditionalBlocks} conditionals, {parseResult.summary.repeatingBlocks} repeating sections
-            </p>
-          </div>
-          <button onClick={() => setParseResult(null)} className="text-green-400 hover:text-green-600 text-sm">✕</button>
-        </div>
-      )}
-
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-sm font-medium text-gray-700">Document templates</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Templates are the .docx files this workflow generates. Variables detected in templates are auto-imported.</p>
+          <h2 className="text-sm font-medium text-gray-700">Pages</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Pages are the steps in the interview wizard. Each page shows the questions assigned to it (via the question&apos;s <strong>Page</strong> field).
+            You can add <strong>page logic</strong> to show or hide entire pages based on earlier answers.
+          </p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-brand-700 text-white rounded-lg text-sm hover:bg-brand-600">
-          Add template
-        </button>
+        <div className="flex gap-2">
+          {questionGroups.length > 0 && items.length === 0 && (
+            <button onClick={autoGen} className="px-3 py-1.5 border border-brand-200 text-brand-700 rounded-lg text-sm hover:bg-brand-50">Auto-generate from questions</button>
+          )}
+          <button onClick={() => add("New Page")} className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50">+ Add page</button>
+          {dirty && <button onClick={save} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Save pages</button>}
+        </div>
       </div>
 
-      {workflowTemplates.length === 0 ? (
-        <EmptyState
-          title="No templates yet"
-          description="Upload .docx templates to define which documents this workflow generates. Variables inside the templates will be auto-detected."
-          action="Upload your first template"
-          onAction={() => setShowAdd(true)}
-        />
+      {items.length === 0 ? (
+        <Empty title="No pages configured" desc="Pages organize your questions into steps. Each page becomes one screen in the interview wizard." action={questionGroups.length > 0 ? `Auto-generate ${questionGroups.length} pages from question groups` : "Add a page"} onAction={() => questionGroups.length > 0 ? autoGen() : add("New Page")} />
       ) : (
         <div className="space-y-2">
-          {workflowTemplates.map((wt: any, i: number) => {
-            const vars = (wt.template?.parsedSchema as any)?.variables || [];
+          {items.map((p, i) => {
+            const pQuestions = questions.filter(q => q.groupName === p.name);
             return (
-              <div key={wt.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-center gap-4 group hover:border-brand-200 transition-colors">
-                <div className="w-8 h-8 bg-brand-50 text-brand-600 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0">{i + 1}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{wt.template?.name}</p>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
-                    <span className="uppercase font-medium">{wt.template?.format}</span>
-                    {vars.length > 0 && <span>{vars.length} variables</span>}
-                    {wt.condition && <span className="text-amber-500">Conditional</span>}
+              <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-4 group hover:border-brand-200 transition-colors">
+                <div className="flex items-start gap-3">
+                  <div className="flex flex-col gap-px pt-1 opacity-30 group-hover:opacity-100">
+                    <button onClick={() => move(i, -1)} className="text-[10px] leading-none hover:text-brand-600">▲</button>
+                    <button onClick={() => move(i, 1)} className="text-[10px] leading-none hover:text-brand-600">▼</button>
+                  </div>
+                  <div className="w-9 h-9 bg-brand-50 text-brand-700 rounded-lg flex items-center justify-center text-sm font-bold shrink-0">{i + 1}</div>
+                  <div className="flex-1 min-w-0">
+                    <input value={p.name} onChange={e => update(i, { name: e.target.value })} className="text-sm font-medium text-gray-900 bg-transparent border-none outline-none w-full p-0" />
+                    <input value={p.description || ""} onChange={e => update(i, { description: e.target.value || null })} className="text-xs text-gray-400 bg-transparent border-none outline-none w-full p-0 mt-0.5" placeholder="Description shown to the user (optional)" />
+
+                    {/* Page Logic */}
+                    {p.condition !== null && (
+                      <div className="mt-2 p-2 bg-amber-50 rounded-lg border border-amber-200">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-medium text-amber-700">PAGE LOGIC — Only show this page when:</span>
+                          <button onClick={() => update(i, { condition: null })} className="text-[10px] text-amber-400 hover:text-amber-600">Remove</button>
+                        </div>
+                        <ConditionBuilder condition={p.condition || ""} questions={questions} onChange={val => update(i, { condition: val })} />
+                      </div>
+                    )}
+
+                    {/* Questions preview */}
+                    {pQuestions.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {pQuestions.map(q => (
+                          <span key={q.id} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                            {QUESTION_TYPES.find(t => t.value === q.type)?.icon} {q.displayLabel}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-300 mt-2">No questions assigned to this page yet. Set a question&apos;s &ldquo;Page&rdquo; field to &ldquo;{p.name}&rdquo;.</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-gray-400">{pQuestions.length} Q</span>
+                    {p.condition === null && (
+                      <button onClick={() => update(i, { condition: "" })} className="text-[10px] text-gray-300 hover:text-amber-500 opacity-0 group-hover:opacity-100">+ logic</button>
+                    )}
+                    <button onClick={() => remove(i)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">✕</button>
                   </div>
                 </div>
-                <button onClick={() => handleRemove(wt.id)} className="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-red-600 transition-opacity">
-                  Remove
-                </button>
               </div>
             );
           })}
         </div>
       )}
 
-      {/* Add Template Modal */}
+      {uncovered.length > 0 && items.length > 0 && (
+        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+          <p className="text-xs text-amber-700 font-medium">Questions assigned to pages that don&apos;t exist yet:</p>
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {uncovered.map(g => <button key={g} onClick={() => add(g)} className="text-[11px] bg-white border border-amber-300 text-amber-700 px-2 py-0.5 rounded-lg hover:bg-amber-50">+ Create &ldquo;{g}&rdquo; page</button>)}
+          </div>
+        </div>
+      )}
+
+      {dirty && <SaveBar onSave={save} />}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// OUTPUT DOCUMENTS TAB
+// ═══════════════════════════════════════════════════════════
+
+function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate, flash }: {
+  workflowId: string; templates: any[]; allTemplates: any[]; questions: Question[]; onUpdate: () => Promise<void>; flash: (m: string) => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const available = allTemplates.filter(t => !templates.some((wt: any) => wt.template?.id === t.id));
+
+  const addExisting = async (templateId: string) => {
+    try { await api.addTemplateToWorkflow(workflowId, templateId, templates.length + 1); setShowAdd(false); await onUpdate(); flash("Template added"); } catch (err: any) { flash("Error: " + err.message); }
+  };
+
+  const uploadNew = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setUploading(true);
+    try {
+      const buffer = await file.arrayBuffer(); const bytes = new Uint8Array(buffer);
+      let binary = ""; for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      const tmpl = await api.createTemplate({ name: file.name.replace(/\.[^.]+$/, ""), format: file.name.split(".").pop()?.toLowerCase() || "docx" });
+      const result = await api.parseTemplate(base64, file.name, tmpl.id);
+      await api.addTemplateToWorkflow(workflowId, tmpl.id, templates.length + 1);
+      setShowAdd(false); await onUpdate();
+      flash(`Template added — ${result.summary.totalVariables} variables detected`);
+    } catch (err: any) { flash("Error: " + err.message); }
+    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
+  const removeTmpl = async (wtId: string) => {
+    if (!confirm("Remove this document from the workflow?")) return;
+    try { await api.removeTemplateFromWorkflow(workflowId, wtId); await onUpdate(); flash("Template removed"); } catch (err: any) { flash("Error: " + err.message); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className="text-sm font-medium text-gray-700">Output Documents</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            These are the Word templates that get generated when a user completes the interview. You can add <strong>document logic</strong> to control which documents are generated based on answers.
+          </p>
+        </div>
+        <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 bg-brand-700 text-white rounded-lg text-sm hover:bg-brand-600">+ Add document</button>
+      </div>
+
+      {templates.length === 0 ? (
+        <Empty title="No output documents" desc="Upload your Word templates (.docx). Variables inside them ({{company_name}}) will be auto-detected and filled with interview answers." action="Add your first template" onAction={() => setShowAdd(true)} />
+      ) : (
+        <div className="space-y-2">
+          {templates.map((wt: any, i: number) => {
+            const vars = (wt.template?.parsedSchema as any)?.variables || [];
+            return (
+              <div key={wt.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-4 group hover:border-brand-200 transition-colors">
+                <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-sm font-bold shrink-0">📄</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{wt.template?.name}</p>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                    <span className="uppercase font-medium">{wt.template?.format}</span>
+                    {vars.length > 0 && <span>{vars.length} variables detected</span>}
+                  </div>
+                  {vars.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {vars.slice(0, 8).map((v: any) => (
+                        <span key={v.name} className={`text-[10px] px-1.5 py-0.5 rounded ${questions.some(q => q.name === v.name) ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+                          {v.name}
+                        </span>
+                      ))}
+                      {vars.length > 8 && <span className="text-[10px] text-gray-400">+{vars.length - 8}</span>}
+                    </div>
+                  )}
+                  {vars.length > 0 && (
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      <span className="text-green-600">{vars.filter((v: any) => questions.some(q => q.name === v.name)).length} matched</span>
+                      {" / "}
+                      <span className="text-red-500">{vars.filter((v: any) => !questions.some(q => q.name === v.name)).length} unmatched</span>
+                    </p>
+                  )}
+                </div>
+                <button onClick={() => removeTmpl(wt.id)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">Remove</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {showAdd && (
-        <Modal onClose={() => setShowAdd(false)} title="Add template to workflow">
+        <Modal onClose={() => setShowAdd(false)} title="Add output document" subtitle="Upload a Word template or select from your library">
           <div className="mb-5">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Upload new .docx</label>
             <label className="flex items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-xl hover:border-brand-400 hover:bg-brand-50/20 cursor-pointer transition-all">
               <div className="text-center">
                 <p className="text-2xl mb-1">📄</p>
-                <p className="text-sm text-gray-500">{uploading ? "Uploading & parsing..." : "Drop a .docx file here or click to browse"}</p>
-                <p className="text-xs text-gray-400 mt-0.5">Variables will be auto-detected from content controls and {"{{mustache}}"} syntax</p>
+                <p className="text-sm text-gray-500">{uploading ? "Parsing template..." : "Upload .docx template"}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Variables like {"{{company_name}}"} will be auto-detected</p>
               </div>
-              <input ref={fileRef} type="file" accept=".docx" onChange={handleUploadNew} className="hidden" disabled={uploading} />
+              <input ref={fileRef} type="file" accept=".docx" onChange={uploadNew} className="hidden" disabled={uploading} />
             </label>
           </div>
-
-          {availableTemplates.length > 0 && (
+          {available.length > 0 && (
             <>
-              <div className="relative my-4"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div><div className="relative flex justify-center"><span className="bg-white px-3 text-xs text-gray-400">or add existing</span></div></div>
+              <div className="relative my-4"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div><div className="relative flex justify-center"><span className="bg-white px-3 text-xs text-gray-400">or from library</span></div></div>
               <div className="space-y-2 max-h-48 overflow-y-auto">
-                {availableTemplates.map(t => (
-                  <button key={t.id} onClick={() => handleAddExisting(t.id)} className="w-full text-left p-3 border border-gray-200 rounded-lg hover:border-brand-300 hover:bg-brand-50/30 transition-all">
+                {available.map(t => (
+                  <button key={t.id} onClick={() => addExisting(t.id)} className="w-full text-left p-3 border border-gray-200 rounded-lg hover:border-brand-300 hover:bg-brand-50/30 transition-all">
                     <p className="text-sm font-medium text-gray-900">{t.name}</p>
                     <p className="text-xs text-gray-400">{t.format?.toUpperCase()} • v{t.version}</p>
                   </button>
@@ -298,728 +708,137 @@ function TemplatesBuilder({ workflowId, workflowTemplates, allTemplates, onUpdat
 }
 
 // ═══════════════════════════════════════════════════════════
-// VARIABLES BUILDER
+// PREVIEW TAB
 // ═══════════════════════════════════════════════════════════
 
-function VariablesBuilder({ workflowId, variables, onUpdate, setSaveStatus }: {
-  workflowId: string; variables: any[]; onUpdate: () => Promise<void>; setSaveStatus: (s: string) => void;
-}) {
-  const [editVars, setEditVars] = useState<any[]>(variables);
-  const [showAdd, setShowAdd] = useState(false);
-  const [expandedVar, setExpandedVar] = useState<number | null>(null);
-  const [dirty, setDirty] = useState(false);
+function PreviewTab({ pages, questions }: { pages: Page[]; questions: Question[] }) {
+  const [currentPage, setCurrentPage] = useState(0);
 
-  useEffect(() => { setEditVars(variables); setDirty(false); }, [variables]);
+  if (pages.length === 0) {
+    return <Empty title="Nothing to preview" desc="Add pages and questions first, then preview the interview experience here." action="Go to Questions tab" onAction={() => {}} />;
+  }
 
-  const addVar = (v: any) => {
-    setEditVars(prev => [...prev, { ...v, id: `new_${Date.now()}`, displayOrder: prev.length }]);
-    setDirty(true);
-    setShowAdd(false);
-  };
-
-  const updateVar = (idx: number, updates: Record<string, any>) => {
-    setEditVars(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], ...updates };
-      return next;
-    });
-    setDirty(true);
-  };
-
-  const removeVar = (idx: number) => {
-    if (!confirm(`Delete "${editVars[idx].displayLabel}"?`)) return;
-    setEditVars(prev => prev.filter((_, i) => i !== idx));
-    setExpandedVar(null);
-    setDirty(true);
-  };
-
-  const moveVar = (idx: number, dir: -1 | 1) => {
-    const ni = idx + dir;
-    if (ni < 0 || ni >= editVars.length) return;
-    setEditVars(prev => {
-      const next = [...prev];
-      [next[idx], next[ni]] = [next[ni], next[idx]];
-      return next;
-    });
-    setDirty(true);
-  };
-
-  const duplicateVar = (idx: number) => {
-    const original = editVars[idx];
-    const copy = { ...original, id: `new_${Date.now()}`, name: `${original.name}_copy`, displayLabel: `${original.displayLabel} (copy)` };
-    setEditVars(prev => [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)]);
-    setDirty(true);
-  };
-
-  const saveVariables = async () => {
-    setSaveStatus("saving");
-    try {
-      await api.updateVariables(workflowId, editVars.map((v, i) => ({
-        name: v.name,
-        displayLabel: v.displayLabel,
-        type: v.type === "computed" ? "text" : v.type,
-        required: v.required || false,
-        defaultValue: v.defaultValue || null,
-        validation: v.validation || null,
-        helpText: v.helpText || null,
-        condition: v.condition || null,
-        groupName: v.groupName || null,
-        displayOrder: i,
-        isComputed: v.type === "computed" || v.isComputed || false,
-        expression: v.expression || null,
-      })));
-      await onUpdate();
-      setDirty(false);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(""), 2000);
-    } catch (err: any) {
-      alert(err.message);
-      setSaveStatus("error");
-    }
-  };
-
-  // Group variables
-  const groups: Record<string, { vars: any[]; indices: number[] }> = {};
-  editVars.forEach((v, i) => {
-    const g = v.groupName || "Ungrouped";
-    if (!groups[g]) groups[g] = { vars: [], indices: [] };
-    groups[g].vars.push(v);
-    groups[g].indices.push(i);
-  });
-
-  const typeInfo = (type: string) => VAR_TYPES.find(t => t.value === type);
+  const page = pages[currentPage];
+  const pageQs = questions.filter(q => q.groupName === page?.name && !q.isComputed && q.type !== "info");
+  const infoBlocks = questions.filter(q => q.groupName === page?.name && q.type === "info");
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-sm font-medium text-gray-700">Variables ({editVars.length})</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Define the data fields your templates use. Group them to organize the interview.</p>
+          <h2 className="text-sm font-medium text-gray-700">Interview Preview</h2>
+          <p className="text-xs text-gray-400">This is what the user will see when running this workflow.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowAdd(true)} className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
-            + Add variable
+      </div>
+
+      {/* Progress */}
+      <div className="flex items-center gap-2 mb-6">
+        {pages.map((p, i) => (
+          <button key={p.id} onClick={() => setCurrentPage(i)} className="flex-1">
+            <div className={`h-1.5 rounded-full ${i <= currentPage ? "bg-brand-500" : "bg-gray-200"}`} />
+            <p className={`text-[10px] mt-1 ${i === currentPage ? "text-brand-700 font-medium" : "text-gray-400"}`}>{p.name}</p>
           </button>
-          {dirty && (
-            <button onClick={saveVariables} className="px-4 py-1.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600">
-              Save all changes
-            </button>
-          )}
-        </div>
+        ))}
       </div>
 
-      {editVars.length === 0 ? (
-        <EmptyState
-          title="No variables defined"
-          description="Variables are the data fields that feed into your templates. Add them manually or upload a template to auto-detect them."
-          action="Add your first variable"
-          onAction={() => setShowAdd(true)}
-        />
-      ) : (
-        <div className="space-y-6">
-          {Object.entries(groups).map(([groupName, { vars: gVars, indices }]) => (
-            <div key={groupName}>
-              <div className="flex items-center gap-2 mb-2">
-                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{groupName}</h3>
-                <div className="flex-1 h-px bg-gray-200" />
-                <span className="text-xs text-gray-400">{gVars.length} field{gVars.length !== 1 ? "s" : ""}</span>
-              </div>
-              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
-                {gVars.map((v, gi) => {
-                  const realIdx = indices[gi];
-                  const isExpanded = expandedVar === realIdx;
-                  const ti = typeInfo(v.type);
+      {/* Page content */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 max-w-2xl mx-auto">
+        <h3 className="text-lg font-medium text-gray-900">{page?.name}</h3>
+        {page?.description && <p className="text-sm text-gray-500 mt-1">{page.description}</p>}
+        {page?.condition && <p className="text-xs text-amber-600 mt-1 bg-amber-50 px-2 py-1 rounded inline-block">Conditional: {page.condition}</p>}
 
-                  return (
-                    <div key={v.id || realIdx}>
-                      {/* Collapsed row */}
-                      <div
-                        className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50/50 transition-colors ${isExpanded ? "bg-gray-50/80" : ""}`}
-                        onClick={() => setExpandedVar(isExpanded ? null : realIdx)}
-                      >
-                        <div className="flex flex-col gap-0.5 opacity-40 hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => moveVar(realIdx, -1)} className="text-[10px] leading-none hover:text-brand-600">▲</button>
-                          <button onClick={() => moveVar(realIdx, 1)} className="text-[10px] leading-none hover:text-brand-600">▼</button>
-                        </div>
-
-                        <div className="w-7 h-7 bg-gray-100 rounded flex items-center justify-center text-xs flex-shrink-0" title={ti?.label}>
-                          {ti?.icon || "?"}
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-900 truncate">{v.displayLabel}</span>
-                            {v.required && <span className="text-red-400 text-xs">*</span>}
-                            {v.condition && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">conditional</span>}
-                            {(v.type === "computed" || v.isComputed) && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">computed</span>}
-                          </div>
-                          <p className="text-xs text-gray-400 font-mono truncate">{v.name}</p>
-                        </div>
-
-                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{ti?.label || v.type}</span>
-                        <span className="text-xs text-gray-300">{isExpanded ? "▾" : "▸"}</span>
-                      </div>
-
-                      {/* Expanded editor */}
-                      {isExpanded && (
-                        <VariableEditor
-                          variable={v}
-                          allVariables={editVars}
-                          onChange={(updates) => updateVar(realIdx, updates)}
-                          onDelete={() => removeVar(realIdx)}
-                          onDuplicate={() => duplicateVar(realIdx)}
-                          groupNames={Object.keys(groups)}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+        <div className="mt-6 space-y-5">
+          {infoBlocks.map(q => (
+            <div key={q.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">{q.defaultValue || "Info block"}</div>
           ))}
-        </div>
-      )}
-
-      {dirty && (
-        <div className="fixed bottom-6 right-6 bg-brand-700 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 z-40">
-          <span className="text-sm">Unsaved changes</span>
-          <button onClick={saveVariables} className="px-3 py-1 bg-white/20 rounded-lg text-sm font-medium hover:bg-white/30">Save</button>
-        </div>
-      )}
-
-      {showAdd && <AddVariableModal onAdd={addVar} onClose={() => setShowAdd(false)} groupNames={Object.keys(groups)} allVariables={editVars} />}
-    </div>
-  );
-}
-
-// ── Variable Inline Editor ──
-
-function VariableEditor({ variable: v, allVariables, onChange, onDelete, onDuplicate, groupNames }: {
-  variable: any; allVariables: any[]; onChange: (u: Record<string, any>) => void;
-  onDelete: () => void; onDuplicate: () => void; groupNames: string[];
-}) {
-  const inputClass = "w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none";
-  const labelClass = "block text-xs font-medium text-gray-500 mb-1";
-
-  return (
-    <div className="px-4 py-4 bg-gray-50/50 border-t border-gray-100">
-      <div className="grid grid-cols-3 gap-4">
-        {/* Col 1: Core identity */}
-        <div className="space-y-3">
-          <div>
-            <label className={labelClass}>Display label</label>
-            <input value={v.displayLabel} onChange={e => onChange({ displayLabel: e.target.value })} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Variable name <span className="text-gray-300 font-normal">• used in templates</span></label>
-            <input value={v.name} onChange={e => onChange({ name: e.target.value })} className={`${inputClass} font-mono text-xs`} />
-          </div>
-          <div>
-            <label className={labelClass}>Type</label>
-            <select value={v.type} onChange={e => onChange({ type: e.target.value })} className={inputClass}>
-              {VAR_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelClass}>Group / section</label>
-            <input value={v.groupName || ""} onChange={e => onChange({ groupName: e.target.value })}
-              list="group-suggestions" className={inputClass} placeholder="e.g., Company Information" />
-            <datalist id="group-suggestions">
-              {groupNames.map(g => <option key={g} value={g} />)}
-            </datalist>
-          </div>
-        </div>
-
-        {/* Col 2: Config */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input type="checkbox" checked={v.required || false} onChange={e => onChange({ required: e.target.checked })} className="rounded border-gray-300" />
-              Required
-            </label>
-          </div>
-          <div>
-            <label className={labelClass}>Default value</label>
-            <input value={v.defaultValue || ""} onChange={e => onChange({ defaultValue: e.target.value })} className={inputClass} placeholder="Pre-filled value" />
-          </div>
-          <div>
-            <label className={labelClass}>Help text</label>
-            <input value={v.helpText || ""} onChange={e => onChange({ helpText: e.target.value })} className={inputClass} placeholder="Guidance for the person filling this in" />
-          </div>
-
-          {/* Type-specific config */}
-          {(v.type === "dropdown" || v.type === "multi_select") && (
-            <div>
-              <label className={labelClass}>Options <span className="text-gray-300 font-normal">• one per line</span></label>
-              <textarea
-                value={(v.validation?.options || []).join("\n")}
-                onChange={e => onChange({ validation: { ...v.validation, options: e.target.value.split("\n").filter(Boolean) } })}
-                className={`${inputClass} h-20 resize-y`}
-                placeholder={"Option 1\nOption 2\nOption 3"}
-              />
-            </div>
-          )}
-
-          {v.type === "number" && (
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className={labelClass}>Min</label>
-                <input type="number" value={v.validation?.min ?? ""} onChange={e => onChange({ validation: { ...v.validation, min: e.target.value ? Number(e.target.value) : undefined } })} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Max</label>
-                <input type="number" value={v.validation?.max ?? ""} onChange={e => onChange({ validation: { ...v.validation, max: e.target.value ? Number(e.target.value) : undefined } })} className={inputClass} />
-              </div>
-            </div>
-          )}
-
-          {v.type === "text" && (
-            <div>
-              <label className={labelClass}>Max length</label>
-              <input type="number" value={v.validation?.maxLength ?? ""} onChange={e => onChange({ validation: { ...v.validation, maxLength: e.target.value ? Number(e.target.value) : undefined } })} className={inputClass} placeholder="No limit" />
-            </div>
-          )}
-        </div>
-
-        {/* Col 3: Logic */}
-        <div className="space-y-3">
-          <div>
-            <label className={labelClass}>Visibility condition</label>
-            <ConditionBuilder
-              condition={v.condition || ""}
-              variables={allVariables.filter(av => av.name !== v.name)}
-              onChange={val => onChange({ condition: val || null })}
-            />
-          </div>
-
-          {(v.type === "computed" || v.isComputed) && (
-            <div>
-              <label className={labelClass}>Computation expression</label>
-              <textarea
-                value={v.expression || ""}
-                onChange={e => onChange({ expression: e.target.value })}
-                className={`${inputClass} h-16 font-mono text-xs resize-y`}
-                placeholder="e.g., total_shares * ownership_percent / 100"
-              />
-              <p className="text-[10px] text-gray-400 mt-1">Available: +, -, *, /, round(), floor(), ceil(), and variable names</p>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 pt-4 border-t border-gray-200">
-            <button onClick={onDuplicate} className="text-xs text-gray-400 hover:text-gray-600">Duplicate</button>
-            <span className="text-gray-200">•</span>
-            <button onClick={onDelete} className="text-xs text-red-400 hover:text-red-600">Delete</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Condition Builder ──
-
-function ConditionBuilder({ condition, variables, onChange }: {
-  condition: string; variables: any[]; onChange: (val: string) => void;
-}) {
-  // Parse existing condition
-  const parsed = parseConditionStr(condition);
-
-  const updateCondition = (varName: string, op: string, val: string) => {
-    if (!varName) { onChange(""); return; }
-    if (op === "truthy" || op === "falsy") { onChange(op === "falsy" ? `!${varName}` : varName); return; }
-    if (op === "empty" || op === "not_empty") { onChange(op === "empty" ? `!${varName}` : varName); return; }
-    onChange(`${varName} ${op === "eq" ? "==" : op === "neq" ? "!=" : op === "gt" ? ">" : op === "lt" ? "<" : op === "gte" ? ">=" : "<="} "${val}"`);
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <select
-        value={parsed.varName}
-        onChange={e => updateCondition(e.target.value, parsed.op || "eq", parsed.val)}
-        className="w-full px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-brand-500 outline-none"
-      >
-        <option value="">Always visible</option>
-        {variables.map(v => <option key={v.name} value={v.name}>{v.displayLabel || v.name}</option>)}
-      </select>
-      {parsed.varName && (
-        <div className="flex gap-1.5">
-          <select
-            value={parsed.op}
-            onChange={e => updateCondition(parsed.varName, e.target.value, parsed.val)}
-            className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-brand-500 outline-none"
-          >
-            {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          {!["truthy", "falsy", "empty", "not_empty"].includes(parsed.op) && (
-            <input
-              value={parsed.val}
-              onChange={e => updateCondition(parsed.varName, parsed.op, e.target.value)}
-              className="flex-1 px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-brand-500 outline-none"
-              placeholder="value"
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function parseConditionStr(c: string): { varName: string; op: string; val: string } {
-  if (!c) return { varName: "", op: "eq", val: "" };
-  const match = c.match(/^(\S+)\s*(==|!=|>=|<=|>|<)\s*["']?([^"']*)["']?$/);
-  if (match) return { varName: match[1], op: match[2] === "==" ? "eq" : match[2] === "!=" ? "neq" : match[2] === ">" ? "gt" : match[2] === "<" ? "lt" : match[2] === ">=" ? "gte" : "lte", val: match[3] };
-  if (c.startsWith("!")) return { varName: c.slice(1), op: "falsy", val: "" };
-  return { varName: c, op: "truthy", val: "" };
-}
-
-// ═══════════════════════════════════════════════════════════
-// ADD VARIABLE MODAL
-// ═══════════════════════════════════════════════════════════
-
-function AddVariableModal({ onAdd, onClose, groupNames, allVariables }: {
-  onAdd: (v: any) => void; onClose: () => void; groupNames: string[]; allVariables: any[];
-}) {
-  const [displayLabel, setDisplayLabel] = useState("");
-  const [name, setName] = useState("");
-  const [nameEdited, setNameEdited] = useState(false);
-  const [type, setType] = useState("text");
-  const [groupName, setGroupName] = useState(groupNames[0] || "");
-  const [required, setRequired] = useState(false);
-
-  // Auto-generate name from label
-  useEffect(() => {
-    if (!nameEdited && displayLabel) {
-      setName(displayLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, ""));
-    }
-  }, [displayLabel, nameEdited]);
-
-  const nameTaken = allVariables.some(v => v.name === name);
-
-  return (
-    <Modal onClose={onClose} title="Add variable">
-      {/* Type picker grid */}
-      <div className="mb-5">
-        <label className="block text-xs font-medium text-gray-500 mb-2">Choose a type</label>
-        <div className="grid grid-cols-5 gap-1.5">
-          {VAR_TYPES.map(t => (
-            <button
-              key={t.value}
-              onClick={() => setType(t.value)}
-              className={`p-2 rounded-lg border text-center transition-all ${
-                type === t.value
-                  ? "border-brand-400 bg-brand-50 ring-1 ring-brand-400"
-                  : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-              }`}
-            >
-              <span className="text-base block">{t.icon}</span>
-              <span className="text-[10px] text-gray-600 mt-0.5 block leading-tight">{t.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Display label</label>
-          <input value={displayLabel} onChange={e => setDisplayLabel(e.target.value)} autoFocus
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-            placeholder="e.g., Company Legal Name" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Variable name</label>
-          <div className="relative">
-            <input value={name} onChange={e => { setName(e.target.value); setNameEdited(true); }}
-              className={`w-full px-3 py-2 border rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 outline-none ${nameTaken ? "border-red-300" : "border-gray-300"}`}
-              placeholder="company_name" />
-            {nameTaken && <p className="text-[10px] text-red-500 mt-0.5">This name is already in use</p>}
-          </div>
-        </div>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Group</label>
-            <input value={groupName} onChange={e => setGroupName(e.target.value)} list="add-var-groups"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
-              placeholder="e.g., Company Information" />
-            <datalist id="add-var-groups">{groupNames.map(g => <option key={g} value={g} />)}</datalist>
-          </div>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={required} onChange={e => setRequired(e.target.checked)} className="rounded border-gray-300" />
-              <span className="text-gray-600">Required</span>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex justify-end gap-3 mt-6">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600">Cancel</button>
-        <button onClick={() => { if (name && displayLabel && !nameTaken) onAdd({ name, displayLabel, type, groupName: groupName || null, required }); }}
-          disabled={!name || !displayLabel || nameTaken}
-          className="px-5 py-2 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600 disabled:opacity-50">
-          Add variable
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// INTERVIEW BUILDER
-// ═══════════════════════════════════════════════════════════
-
-function InterviewBuilder({ workflowId, sections, variables, onUpdate, setSaveStatus }: {
-  workflowId: string; sections: any[]; variables: any[]; onUpdate: () => Promise<void>; setSaveStatus: (s: string) => void;
-}) {
-  const [editSections, setEditSections] = useState(sections);
-  const [dirty, setDirty] = useState(false);
-
-  useEffect(() => { setEditSections(sections); setDirty(false); }, [sections]);
-
-  const varGroups = Array.from(new Set(variables.map((v: any) => v.groupName).filter(Boolean))) as string[];
-  const uncovered = varGroups.filter(g => !editSections.some((s: any) => s.name === g));
-
-  const addSection = (name: string, desc?: string) => {
-    setEditSections(prev => [...prev, { id: `new_${Date.now()}`, name, description: desc || null, condition: null }]);
-    setDirty(true);
-  };
-
-  const updateSection = (i: number, updates: Record<string, any>) => {
-    setEditSections(prev => { const n = [...prev]; n[i] = { ...n[i], ...updates }; return n; });
-    setDirty(true);
-  };
-
-  const removeSection = (i: number) => { setEditSections(prev => prev.filter((_, j) => j !== i)); setDirty(true); };
-
-  const moveSection = (i: number, dir: -1 | 1) => {
-    const ni = i + dir;
-    if (ni < 0 || ni >= editSections.length) return;
-    setEditSections(prev => { const n = [...prev]; [n[i], n[ni]] = [n[ni], n[i]]; return n; });
-    setDirty(true);
-  };
-
-  const autoGenerate = () => {
-    setEditSections(varGroups.map((g, i) => ({ id: `auto_${Date.now()}_${i}`, name: g, description: null, condition: null })));
-    setDirty(true);
-  };
-
-  const saveSections = async () => {
-    setSaveStatus("saving");
-    try {
-      const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/workflows/${workflowId}/interview`,
-        { method: "PUT", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ sections: editSections.map((s, i) => ({ name: s.name, description: s.description, displayOrder: i, condition: s.condition })) }) }
-      );
-      if (!res.ok) throw new Error((await res.json()).error);
-      await onUpdate();
-      setDirty(false);
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(""), 2000);
-    } catch (err: any) { alert(err.message); setSaveStatus("error"); }
-  };
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-sm font-medium text-gray-700">Interview steps ({editSections.length})</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Each section becomes a step in the interview wizard. Variables are assigned to sections by their Group name.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {varGroups.length > 0 && editSections.length === 0 && (
-            <button onClick={autoGenerate} className="px-3 py-1.5 border border-brand-200 text-brand-700 rounded-lg text-sm hover:bg-brand-50">
-              Auto-generate from groups
-            </button>
-          )}
-          <button onClick={() => addSection("New Section")} className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50">
-            + Add section
-          </button>
-          {dirty && (
-            <button onClick={saveSections} className="px-4 py-1.5 bg-brand-700 text-white rounded-lg text-sm font-medium hover:bg-brand-600">
-              Save sections
-            </button>
-          )}
-        </div>
-      </div>
-
-      {editSections.length === 0 ? (
-        <EmptyState
-          title="No interview steps"
-          description="Interview steps organize variables into a multi-step wizard. Each step shows variables from a matching Group."
-          action={varGroups.length > 0 ? `Auto-generate ${varGroups.length} steps from variable groups` : "Add a section"}
-          onAction={() => varGroups.length > 0 ? autoGenerate() : addSection("New Section")}
-        />
-      ) : (
-        <div className="space-y-2">
-          {editSections.map((s, i) => {
-            const sVars = variables.filter((v: any) => v.groupName === s.name);
+          {pageQs.map(q => {
+            const t = QUESTION_TYPES.find(qt => qt.value === q.type);
             return (
-              <div key={s.id} className="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3 group hover:border-brand-200 transition-colors">
-                <div className="flex flex-col gap-0.5 pt-1 opacity-40 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => moveSection(i, -1)} className="text-[10px] leading-none hover:text-brand-600">▲</button>
-                  <button onClick={() => moveSection(i, 1)} className="text-[10px] leading-none hover:text-brand-600">▼</button>
-                </div>
-                <div className="w-8 h-8 bg-brand-50 text-brand-700 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0">{i + 1}</div>
-                <div className="flex-1 min-w-0">
-                  <input
-                    value={s.name}
-                    onChange={e => updateSection(i, { name: e.target.value })}
-                    className="text-sm font-medium text-gray-900 bg-transparent border-none outline-none w-full p-0"
-                  />
-                  <input
-                    value={s.description || ""}
-                    onChange={e => updateSection(i, { description: e.target.value || null })}
-                    className="text-xs text-gray-400 bg-transparent border-none outline-none w-full p-0 mt-0.5"
-                    placeholder="Add a description for this step..."
-                  />
-                  {s.condition && (
-                    <div className="mt-2 flex items-center gap-1.5">
-                      <span className="text-[10px] text-amber-500">Visible when:</span>
-                      <input
-                        value={s.condition}
-                        onChange={e => updateSection(i, { condition: e.target.value })}
-                        className="text-[11px] text-amber-600 font-mono bg-amber-50 border border-amber-200 rounded px-2 py-0.5 outline-none flex-1"
-                      />
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 mt-2">
-                    {sVars.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {sVars.slice(0, 6).map((v: any) => (
-                          <span key={v.id} className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{v.displayLabel}</span>
-                        ))}
-                        {sVars.length > 6 && <span className="text-[10px] text-gray-400">+{sVars.length - 6} more</span>}
-                      </div>
-                    ) : (
-                      <span className="text-[10px] text-gray-300">No variables in this group yet</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{sVars.length} field{sVars.length !== 1 ? "s" : ""}</span>
-                  {!s.condition && (
-                    <button onClick={() => updateSection(i, { condition: "" })} className="text-[10px] text-gray-300 hover:text-amber-500 opacity-0 group-hover:opacity-100">
-                      + condition
-                    </button>
-                  )}
-                  <button onClick={() => removeSection(i)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">✕</button>
-                </div>
+              <div key={q.id}>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {q.displayLabel} {q.required && <span className="text-red-400">*</span>}
+                  {q.condition && <span className="text-[10px] text-amber-500 ml-1">(conditional)</span>}
+                </label>
+                {q.helpText && <p className="text-xs text-gray-400 mb-1.5">{q.helpText}</p>}
+                <PreviewInput type={q.type} validation={q.validation} />
               </div>
             );
           })}
         </div>
-      )}
 
-      {uncovered.length > 0 && editSections.length > 0 && (
-        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2">
-          <span className="text-amber-500 mt-0.5">⚠</span>
-          <div>
-            <p className="text-xs text-amber-700 font-medium">Variable groups without interview steps</p>
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {uncovered.map(g => (
-                <button key={g} onClick={() => addSection(g)} className="text-[11px] bg-white border border-amber-300 text-amber-700 px-2 py-0.5 rounded-lg hover:bg-amber-50">
-                  + {g}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════
-// LOGIC VIEW
-// ═══════════════════════════════════════════════════════════
-
-function LogicBuilder({ variables }: { variables: any[] }) {
-  const conditionalVars = variables.filter((v: any) => v.condition);
-  const computedVars = variables.filter((v: any) => v.isComputed || v.type === "computed");
-  const requiredVars = variables.filter((v: any) => v.required);
-
-  return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-sm font-medium text-gray-700">Logic overview</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Visual summary of conditions, computed fields, and dependencies across your workflow.</p>
-      </div>
-
-      {/* Conditional fields */}
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Conditional fields ({conditionalVars.length})</h3>
-        {conditionalVars.length === 0 ? (
-          <p className="text-xs text-gray-400 bg-white rounded-xl border border-gray-200 p-4">No conditional fields. Add conditions in the Variables tab to show/hide fields based on other answers.</p>
-        ) : (
-          <div className="space-y-2">
-            {conditionalVars.map((v: any) => {
-              const parsed = parseConditionStr(v.condition);
-              const depVar = variables.find((dv: any) => dv.name === parsed.varName);
-              return (
-                <div key={v.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">{v.displayLabel}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Show when <span className="text-amber-600 font-medium">{depVar?.displayLabel || parsed.varName}</span>
-                      {" "}<span className="text-gray-500">{OPERATORS.find(o => o.value === parsed.op)?.label || parsed.op}</span>
-                      {parsed.val && <span className="text-brand-600 font-medium"> &ldquo;{parsed.val}&rdquo;</span>}
-                    </p>
-                  </div>
-                  <span className="text-xs text-gray-400 font-mono">{v.condition}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Computed fields */}
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Computed fields ({computedVars.length})</h3>
-        {computedVars.length === 0 ? (
-          <p className="text-xs text-gray-400 bg-white rounded-xl border border-gray-200 p-4">No computed fields. Add variables with type &ldquo;Computed&rdquo; to calculate values from other variables.</p>
-        ) : (
-          <div className="space-y-2">
-            {computedVars.map((v: any) => (
-              <div key={v.id} className="bg-white rounded-xl border border-gray-200 p-3">
-                <p className="text-sm font-medium text-gray-900">{v.displayLabel}</p>
-                <p className="text-xs text-purple-600 font-mono mt-1">{v.expression || "No expression defined"}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Required fields summary */}
-      <div>
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Required fields ({requiredVars.length} of {variables.length})</h3>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          {requiredVars.length === 0 ? (
-            <p className="text-xs text-gray-400">No required fields. Users can skip any field in the interview.</p>
+        <div className="flex justify-between mt-8">
+          <button disabled={currentPage === 0} onClick={() => setCurrentPage(p => p - 1)} className="px-4 py-2 text-sm text-gray-500 disabled:opacity-30">← Back</button>
+          {currentPage < pages.length - 1 ? (
+            <button onClick={() => setCurrentPage(p => p + 1)} className="px-6 py-2 bg-brand-700 text-white rounded-lg text-sm">Next →</button>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {requiredVars.map((v: any) => (
-                <span key={v.id} className="text-[11px] bg-red-50 text-red-600 px-2 py-0.5 rounded">{v.displayLabel}</span>
-              ))}
-            </div>
+            <button className="px-6 py-2 bg-green-600 text-white rounded-lg text-sm">Generate documents</button>
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function PreviewInput({ type, validation }: { type: string; validation: any }) {
+  const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50";
+  switch (type) {
+    case "boolean": return <div className="flex gap-3"><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">Yes</button><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">No</button></div>;
+    case "dropdown": case "state": return <select className={ic}><option>Select...</option>{(validation?.options || []).map((o: string) => <option key={o}>{o}</option>)}</select>;
+    case "multi_select": return <div className="flex flex-wrap gap-2">{(validation?.options || ["Option A", "Option B"]).map((o: string) => <label key={o} className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="rounded" />{o}</label>)}</div>;
+    case "date": return <input type="date" className={ic} />;
+    case "rich_text": return <textarea className={`${ic} h-20`} />;
+    case "repeating": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400"><button className="px-3 py-1 bg-gray-100 rounded text-sm">+ Add {validation?.itemLabel || "item"}</button></div>;
+    case "file_upload": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400">Click or drag to upload</div>;
+    default: return <input type={type === "email" ? "email" : type === "number" || type === "currency" || type === "percent" ? "number" : type === "phone" ? "tel" : "text"} className={ic} />;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ═══════════════════════════════════════════════════════════
 
-function Modal({ onClose, title, children }: { onClose: () => void; title: string; children: React.ReactNode }) {
+function ConditionBuilder({ condition, questions, onChange }: { condition: string; questions: Question[]; onChange: (v: string) => void }) {
+  const p = parseCond(condition);
+  const set = (varName: string, op: string, val: string) => {
+    if (!varName) { onChange(""); return; }
+    if (op === "truthy") { onChange(varName); return; }
+    if (op === "falsy") { onChange(`!${varName}`); return; }
+    onChange(`${varName} ${op === "eq" ? "==" : op === "neq" ? "!=" : op === "gt" ? ">" : "<"} "${val}"`);
+  };
+  return (
+    <div className="flex gap-2 items-center flex-wrap">
+      <select value={p.v} onChange={e => set(e.target.value, p.o || "eq", p.c)} className="px-2 py-1.5 border border-gray-200 rounded text-xs outline-none flex-1 min-w-[140px]">
+        <option value="">Always show</option>
+        {questions.map(q => <option key={q.name} value={q.name}>{q.displayLabel}</option>)}
+      </select>
+      {p.v && (
+        <>
+          <select value={p.o} onChange={e => set(p.v, e.target.value, p.c)} className="px-2 py-1.5 border border-gray-200 rounded text-xs outline-none">
+            {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          {!["truthy", "falsy"].includes(p.o) && (
+            <input value={p.c} onChange={e => set(p.v, p.o, e.target.value)} className="px-2 py-1.5 border border-gray-200 rounded text-xs outline-none flex-1 min-w-[100px]" placeholder="value" />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function parseCond(c: string): { v: string; o: string; c: string } {
+  if (!c) return { v: "", o: "eq", c: "" };
+  const m = c.match(/^(\S+)\s*(==|!=|>|<)\s*["']?([^"']*)["']?$/);
+  if (m) return { v: m[1], o: m[2] === "==" ? "eq" : m[2] === "!=" ? "neq" : m[2] === ">" ? "gt" : "lt", c: m[3] };
+  if (c.startsWith("!")) return { v: c.slice(1), o: "falsy", c: "" };
+  return { v: c, o: "truthy", c: "" };
+}
+
+function Modal({ onClose, title, subtitle, children }: { onClose: () => void; title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between mb-1">
+          <div><h2 className="text-lg font-semibold text-gray-900">{title}</h2>{subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}</div>
           <button onClick={onClose} className="text-gray-300 hover:text-gray-500 text-xl leading-none">✕</button>
         </div>
         {children}
@@ -1028,16 +847,31 @@ function Modal({ onClose, title, children }: { onClose: () => void; title: strin
   );
 }
 
-function EmptyState({ title, description, action, onAction }: {
-  title: string; description: string; action: string; onAction: () => void;
-}) {
+function Empty({ title, desc, action, onAction }: { title: string; desc: string; action: string; onAction: () => void }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 border-dashed p-12 text-center">
       <p className="text-gray-500 font-medium">{title}</p>
-      <p className="text-sm text-gray-400 mt-1 max-w-md mx-auto">{description}</p>
-      <button onClick={onAction} className="mt-4 px-4 py-2 bg-brand-50 text-brand-700 rounded-lg text-sm font-medium hover:bg-brand-100 transition-colors">
-        {action}
-      </button>
+      <p className="text-sm text-gray-400 mt-1 max-w-md mx-auto">{desc}</p>
+      <button onClick={onAction} className="mt-4 px-4 py-2 bg-brand-50 text-brand-700 rounded-lg text-sm font-medium hover:bg-brand-100">{action}</button>
     </div>
   );
+}
+
+function Field({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
+  return <div><label className="block text-xs font-medium text-gray-500 mb-1">{label}{sub && <span className="text-gray-300 font-normal"> — {sub}</span>}</label>{children}</div>;
+}
+
+function SaveBar({ onSave }: { onSave: () => void }) {
+  return (
+    <div className="fixed bottom-6 right-6 bg-brand-700 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 z-40">
+      <span className="text-sm">Unsaved changes</span>
+      <button onClick={onSave} className="px-3 py-1 bg-white/20 rounded-lg text-sm font-medium hover:bg-white/30">Save now</button>
+    </div>
+  );
+}
+
+function groupBy<T>(arr: T[], fn: (item: T) => string): Record<string, T[]> {
+  const result: Record<string, T[]> = {};
+  arr.forEach(item => { const k = fn(item); if (!result[k]) result[k] = []; result[k].push(item); });
+  return result;
 }
