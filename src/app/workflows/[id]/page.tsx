@@ -5,6 +5,8 @@ import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { AddressInput } from "@/components/AddressInput";
+import { PhoneInput } from "@/components/PhoneInput";
 
 // ═══════════════════════════════════════════════════════════
 // TYPES & CONSTANTS
@@ -1343,14 +1345,16 @@ function PreviewTab({ pages, questions }: { pages: Page[]; questions: Question[]
 function PreviewInput({ type, validation }: { type: string; validation: any }) {
   const ic = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50";
   switch (type) {
-    case "boolean": return <div className="flex gap-3"><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">Yes</button><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">No</button></div>;
+    case "boolean": return <div className="flex gap-3"><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">{validation?.trueLabel || "Yes"}</button><button className="px-4 py-1.5 rounded-lg text-sm border border-gray-200">{validation?.falseLabel || "No"}</button></div>;
     case "dropdown": case "state": return <select className={ic}><option>Select...</option>{(validation?.options || []).map((o: string) => <option key={o}>{o}</option>)}</select>;
     case "multi_select": return <div className="flex flex-wrap gap-2">{(validation?.options || ["Option A", "Option B"]).map((o: string) => <label key={o} className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="rounded" />{o}</label>)}</div>;
     case "date": return <input type="date" className={ic} />;
     case "rich_text": return <textarea className={`${ic} h-20`} />;
     case "repeating": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400"><button className="px-3 py-1 bg-gray-100 rounded text-sm">+ Add {validation?.itemLabel || "item"}</button></div>;
     case "file_upload": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400">Click or drag to upload</div>;
-    default: return <input type={type === "email" ? "email" : type === "number" || type === "currency" || type === "percent" ? "number" : type === "phone" ? "tel" : "text"} className={ic} />;
+    case "phone": return <PhoneInput value={null} onChange={() => {}} />;
+    case "address": return <AddressInput value={null} onChange={() => {}} fields={validation?.fields} />;
+    default: return <input type={type === "email" ? "email" : type === "number" || type === "currency" || type === "percent" ? "number" : "text"} className={ic} />;
   }
 }
 

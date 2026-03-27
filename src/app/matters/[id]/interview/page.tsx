@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 import { useRouter, useParams } from "next/navigation";
+import { AddressInput } from "@/components/AddressInput";
+import { PhoneInput } from "@/components/PhoneInput";
 
 interface InterviewSection {
   id: string;
@@ -334,8 +336,15 @@ function VariableField({ variable, value, onChange }: { variable: Variable; valu
       return (
         <div>
           {label}
-          <input type="tel" value={currentValue} onChange={(e) => onChange(e.target.value)} className={inputClass} placeholder="(555) 555-5555" />
-          {help}
+          <PhoneInput value={currentValue} onChange={onChange} helpText={helpText || undefined} />
+        </div>
+      );
+
+    case "address":
+      return (
+        <div>
+          {label}
+          <AddressInput value={currentValue} onChange={onChange} fields={validation?.fields} helpText={helpText || undefined} />
         </div>
       );
 
