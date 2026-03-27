@@ -495,118 +495,423 @@ function AddQuestionModal({ onAdd, onClose, pageNames, allQuestions }: {
 function PagesTab({ workflowId, pages, questions, onUpdate, flash }: {
   workflowId: string; pages: Page[]; questions: Question[]; onUpdate: () => Promise<void>; flash: (m: string) => void;
 }) {
-  const [items, setItems] = useState(pages);
-  const [dirty, setDirty] = useState(false);
+  // Parse section info from page descriptions (stored as JSON: {"section":"name","text":"desc"})
+  const parsePageMeta = (p: Page): { section: string; text: string } => {
+    if (p.description && p.description.startsWith("{")) {
+      try { const d = JSON.parse(p.description); return { section: d.section || "General", text: d.text || "" }; } catch {}
+    }
+    return { section: "General", text: p.description || "" };
+  };
 
-  useEffect(() => { setItems(pages); setDirty(false); }, [pages]);
+  const encodePageMeta = (section: string, text: string): string => JSON.stringify({ section, text });
+
+  const [items, setItems] = useState<(Page & { _section: string; _text: string })[]>([]);
+  const [sections, setSections] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string | null>(null); // page id
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [addingSection, setAddingSection] = useState(false);
+  const [newSectionName, setNewSectionName] = useState("");
+
+  // Load and parse
+  useEffect(() => {
+    const parsed = pages.map(p => {
+      const meta = parsePageMeta(p);
+      return { ...p, _section: meta.section, _text: meta.text };
+    });
+    setItems(parsed);
+
+    // Extract unique sections in order
+    const seen = new Set<string>();
+    const secs: string[] = [];
+    for (const p of parsed) { if (!seen.has(p._section)) { seen.add(p._section); secs.push(p._section); } }
+    if (secs.length === 0) secs.push("General");
+    setSections(secs);
+    setDirty(false);
+  }, [pages]);
 
   const questionGroups = Array.from(new Set(questions.map(q => q.groupName).filter(Boolean))) as string[];
-  const uncovered = questionGroups.filter(g => !items.some(p => p.name === g));
 
-  const add = (name: string) => { setItems(p => [...p, { id: `new_${Date.now()}`, name, description: null, displayOrder: p.length, condition: null }]); setDirty(true); };
-  const update = (i: number, u: Partial<Page>) => { setItems(p => { const n = [...p]; n[i] = { ...n[i], ...u }; return n; }); setDirty(true); };
-  const remove = (i: number) => { setItems(p => p.filter((_, j) => j !== i)); setDirty(true); };
-  const move = (i: number, d: -1 | 1) => { const ni = i + d; if (ni < 0 || ni >= items.length) return; setItems(p => { const n = [...p]; [n[i], n[ni]] = [n[ni], n[i]]; return n; }); setDirty(true); };
+  // Section operations
+  const addSection = (name: string) => {
+    if (!name.trim() || sections.includes(name.trim())) return;
+    setSections(s => [...s, name.trim()]);
+    setAddingSection(false);
+    setNewSectionName("");
+    setDirty(true);
+  };
 
-  const autoGen = () => { setItems(questionGroups.map((g, i) => ({ id: `auto_${Date.now()}_${i}`, name: g, description: null, displayOrder: i, condition: null }))); setDirty(true); };
+  const renameSection = (old: string, newName: string) => {
+    if (!newName.trim() || (newName !== old && sections.includes(newName))) return;
+    setSections(s => s.map(n => n === old ? newName.trim() : n));
+    setItems(p => p.map(pg => pg._section === old ? { ...pg, _section: newName.trim() } : pg));
+    if (selectedSection === old) setSelectedSection(newName.trim());
+    setDirty(true);
+  };
 
+  const removeSection = (name: string) => {
+    const pagesInSection = items.filter(p => p._section === name);
+    if (pagesInSection.length > 0 && !confirm(`Delete section "${name}" and its ${pagesInSection.length} page(s)?`)) return;
+    setSections(s => s.filter(n => n !== name));
+    setItems(p => p.filter(pg => pg._section !== name));
+    if (selectedSection === name) setSelectedSection(null);
+    setDirty(true);
+  };
+
+  const moveSection = (name: string, dir: -1 | 1) => {
+    setSections(s => {
+      const i = s.indexOf(name);
+      const ni = i + dir;
+      if (ni < 0 || ni >= s.length) return s;
+      const n = [...s]; [n[i], n[ni]] = [n[ni], n[i]]; return n;
+    });
+    setDirty(true);
+  };
+
+  // Page operations
+  const addPage = (sectionName: string) => {
+    const pageName = `New Page ${items.length + 1}`;
+    const newPage = { id: `new_${Date.now()}`, name: pageName, description: null, displayOrder: items.length, condition: null, _section: sectionName, _text: "" };
+    setItems(p => [...p, newPage]);
+    setSelected(newPage.id);
+    setSelectedSection(null);
+    setDirty(true);
+  };
+
+  const updatePage = (id: string, updates: Partial<Page & { _section: string; _text: string }>) => {
+    setItems(p => p.map(pg => pg.id === id ? { ...pg, ...updates } : pg));
+    setDirty(true);
+  };
+
+  const removePage = (id: string) => {
+    setItems(p => p.filter(pg => pg.id !== id));
+    if (selected === id) setSelected(null);
+    setDirty(true);
+  };
+
+  const movePage = (id: string, dir: -1 | 1) => {
+    setItems(prev => {
+      const idx = prev.findIndex(p => p.id === id);
+      const sectionPages = prev.filter(p => p._section === prev[idx]._section);
+      const sIdx = sectionPages.findIndex(p => p.id === id);
+      const nsi = sIdx + dir;
+      if (nsi < 0 || nsi >= sectionPages.length) return prev;
+      // Swap within the full array
+      const otherId = sectionPages[nsi].id;
+      const ai = prev.findIndex(p => p.id === id);
+      const bi = prev.findIndex(p => p.id === otherId);
+      const next = [...prev];
+      [next[ai], next[bi]] = [next[bi], next[ai]];
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const movePageToSection = (pageId: string, newSection: string) => {
+    setItems(p => p.map(pg => pg.id === pageId ? { ...pg, _section: newSection } : pg));
+    setDirty(true);
+  };
+
+  const autoGen = () => {
+    const secs = questionGroups.length > 0 ? ["General"] : ["General"];
+    const newPages = questionGroups.map((g, i) => ({
+      id: `auto_${Date.now()}_${i}`, name: g, description: null, displayOrder: i, condition: null, _section: "General", _text: "",
+    }));
+    setSections(["General"]);
+    setItems(newPages);
+    setDirty(true);
+  };
+
+  // Save
   const save = async () => {
     try {
       const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
+
+      // Build ordered list: pages ordered by section order, then by position within section
+      const ordered: any[] = [];
+      let displayOrder = 0;
+      for (const sec of sections) {
+        const sectionPages = items.filter(p => p._section === sec);
+        for (const p of sectionPages) {
+          ordered.push({ name: p.name, description: encodePageMeta(p._section, p._text), displayOrder: displayOrder++, condition: p.condition });
+        }
+      }
+
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/workflows/${workflowId}/interview`, {
         method: "PUT", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ sections: items.map((s, i) => ({ name: s.name, description: s.description, displayOrder: i, condition: s.condition })) }),
+        body: JSON.stringify({ sections: ordered }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      await onUpdate(); setDirty(false); flash("Pages saved");
+      await onUpdate(); setDirty(false); flash("Structure saved");
     } catch (err: any) { flash("Error: " + err.message); }
   };
+
+  // Selected item
+  const selectedPage = selected ? items.find(p => p.id === selected) : null;
+  const selectedPageQuestions = selectedPage ? questions.filter(q => q.groupName === selectedPage.name) : [];
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-sm font-medium text-gray-700">Pages</h2>
+          <h2 className="text-sm font-medium text-gray-700">Sections &amp; Pages</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            Pages are the steps in the interview wizard. Each page shows the questions assigned to it (via the question&apos;s <strong>Page</strong> field).
-            You can add <strong>page logic</strong> to show or hide entire pages based on earlier answers.
+            <strong>Sections</strong> are broad categories in the progress sidebar. <strong>Pages</strong> are individual screens within a section.
+            Questions are assigned to pages via their &ldquo;Page&rdquo; field.
           </p>
         </div>
         <div className="flex gap-2">
-          {questionGroups.length > 0 && items.length === 0 && (
-            <button onClick={autoGen} className="px-3 py-1.5 border border-brand-200 text-brand-700 rounded-lg text-sm hover:bg-brand-50">Auto-generate from questions</button>
+          {items.length === 0 && questionGroups.length > 0 && (
+            <button onClick={autoGen} className="px-3 py-1.5 border border-brand-200 text-brand-700 rounded-lg text-sm hover:bg-brand-50">Auto-generate</button>
           )}
-          <button onClick={() => add("New Page")} className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50">+ Add page</button>
-          {dirty && <button onClick={save} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Save pages</button>}
+          {dirty && <button onClick={save} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Save structure</button>}
         </div>
       </div>
 
-      {items.length === 0 ? (
-        <Empty title="No pages configured" desc="Pages organize your questions into steps. Each page becomes one screen in the interview wizard." action={questionGroups.length > 0 ? `Auto-generate ${questionGroups.length} pages from question groups` : "Add a page"} onAction={() => questionGroups.length > 0 ? autoGen() : add("New Page")} />
+      {items.length === 0 && sections.length <= 1 && items.length === 0 ? (
+        <Empty title="No interview structure" desc="Create sections to organize the interview, then add pages within each section." action="Get started" onAction={() => { addSection("General"); addPage("General"); }} />
       ) : (
-        <div className="space-y-2">
-          {items.map((p, i) => {
-            const pQuestions = questions.filter(q => q.groupName === p.name);
-            return (
-              <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-4 group hover:border-brand-200 transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className="flex flex-col gap-px pt-1 opacity-30 group-hover:opacity-100">
-                    <button onClick={() => move(i, -1)} className="text-[10px] leading-none hover:text-brand-600">▲</button>
-                    <button onClick={() => move(i, 1)} className="text-[10px] leading-none hover:text-brand-600">▼</button>
-                  </div>
-                  <div className="w-9 h-9 bg-brand-50 text-brand-700 rounded-lg flex items-center justify-center text-sm font-bold shrink-0">{i + 1}</div>
-                  <div className="flex-1 min-w-0">
-                    <input value={p.name} onChange={e => update(i, { name: e.target.value })} className="text-sm font-medium text-gray-900 bg-transparent border-none outline-none w-full p-0" />
-                    <input value={p.description || ""} onChange={e => update(i, { description: e.target.value || null })} className="text-xs text-gray-400 bg-transparent border-none outline-none w-full p-0 mt-0.5" placeholder="Description shown to the user (optional)" />
+        <div className="flex gap-4" style={{ minHeight: 500 }}>
+          {/* ── Left: Section / Page Tree ── */}
+          <div className="w-72 shrink-0 bg-white rounded-xl border border-gray-200 overflow-hidden flex flex-col">
+            <div className="p-3 border-b border-gray-100 flex items-center justify-between">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Structure</span>
+              <button onClick={() => setAddingSection(true)} className="text-[10px] text-brand-600 hover:text-brand-700 font-medium">+ Section</button>
+            </div>
 
-                    {/* Page Logic */}
-                    {p.condition !== null && (
-                      <div className="mt-2 p-2 bg-amber-50 rounded-lg border border-amber-200">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] font-medium text-amber-700">PAGE LOGIC — Only show this page when:</span>
-                          <button onClick={() => update(i, { condition: null })} className="text-[10px] text-amber-400 hover:text-amber-600">Remove</button>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {sections.map((sec) => {
+                const secPages = items.filter(p => p._section === sec);
+                const isSelSec = selectedSection === sec && !selected;
+                return (
+                  <div key={sec}>
+                    {/* Section header */}
+                    <div
+                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${isSelSec ? "bg-brand-50 ring-1 ring-brand-300" : "hover:bg-gray-50"}`}
+                      onClick={() => { setSelectedSection(sec); setSelected(null); }}
+                    >
+                      <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => moveSection(sec, -1)} className="text-[8px] leading-none text-gray-400 hover:text-gray-600">▲</button>
+                        <button onClick={() => moveSection(sec, 1)} className="text-[8px] leading-none text-gray-400 hover:text-gray-600">▼</button>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-700 flex-1 truncate">{sec}</span>
+                      <span className="text-[10px] text-gray-400">{secPages.length}</span>
+                      <button onClick={(e) => { e.stopPropagation(); addPage(sec); }} className="text-[10px] text-brand-500 hover:text-brand-700 opacity-0 group-hover:opacity-100" title="Add page">+</button>
+                    </div>
+
+                    {/* Pages in this section */}
+                    {secPages.map((p, pi) => {
+                      const pqs = questions.filter(q => q.groupName === p.name);
+                      const isSel = selected === p.id;
+                      return (
+                        <div
+                          key={p.id}
+                          className={`flex items-center gap-1.5 ml-5 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${isSel ? "bg-brand-50 ring-1 ring-brand-300" : "hover:bg-gray-50"}`}
+                          onClick={() => { setSelected(p.id); setSelectedSection(null); }}
+                        >
+                          <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => movePage(p.id, -1)} className="text-[8px] leading-none text-gray-400 hover:text-gray-600">▲</button>
+                            <button onClick={() => movePage(p.id, 1)} className="text-[8px] leading-none text-gray-400 hover:text-gray-600">▼</button>
+                          </div>
+                          <span className="w-4 h-4 bg-gray-100 rounded flex items-center justify-center text-[9px] text-gray-500 shrink-0">{pi + 1}</span>
+                          <span className={`text-xs flex-1 truncate ${isSel ? "text-brand-700 font-medium" : "text-gray-600"}`}>{p.name}</span>
+                          <span className="text-[9px] text-gray-300">{pqs.length}Q</span>
+                          {p.condition && <span className="w-1.5 h-1.5 bg-amber-400 rounded-full shrink-0" title="Has page logic" />}
                         </div>
-                        <ConditionBuilder condition={p.condition || ""} questions={questions} onChange={val => update(i, { condition: val })} />
-                      </div>
-                    )}
+                      );
+                    })}
+                  </div>
+                );
+              })}
 
-                    {/* Questions preview */}
-                    {pQuestions.length > 0 ? (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {pQuestions.map(q => (
-                          <span key={q.id} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                            {QUESTION_TYPES.find(t => t.value === q.type)?.icon} {q.displayLabel}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[10px] text-gray-300 mt-2">No questions assigned to this page yet. Set a question&apos;s &ldquo;Page&rdquo; field to &ldquo;{p.name}&rdquo;.</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-gray-400">{pQuestions.length} Q</span>
-                    {p.condition === null && (
-                      <button onClick={() => update(i, { condition: "" })} className="text-[10px] text-gray-300 hover:text-amber-500 opacity-0 group-hover:opacity-100">+ logic</button>
-                    )}
-                    <button onClick={() => remove(i)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">✕</button>
-                  </div>
+              {/* Add section inline */}
+              {addingSection && (
+                <div className="flex gap-1 px-2 mt-1">
+                  <input value={newSectionName} onChange={e => setNewSectionName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") addSection(newSectionName); if (e.key === "Escape") setAddingSection(false); }}
+                    className="flex-1 px-2 py-1 border border-brand-300 rounded text-xs outline-none focus:ring-1 focus:ring-brand-400"
+                    placeholder="Section name" autoFocus />
+                  <button onClick={() => addSection(newSectionName)} className="text-xs text-brand-600 font-medium">Add</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Right: Detail Panel ── */}
+          <div className="flex-1 bg-white rounded-xl border border-gray-200 p-5 overflow-y-auto">
+            {selectedPage ? (
+              <PageEditor
+                page={selectedPage}
+                questions={selectedPageQuestions}
+                allQuestions={questions}
+                sections={sections}
+                onUpdate={(u) => updatePage(selectedPage.id, u)}
+                onRemove={() => removePage(selectedPage.id)}
+                onMoveToSection={(sec) => movePageToSection(selectedPage.id, sec)}
+              />
+            ) : selectedSection ? (
+              <SectionEditor
+                name={selectedSection}
+                pages={items.filter(p => p._section === selectedSection)}
+                questions={questions}
+                onRename={(n) => renameSection(selectedSection, n)}
+                onRemove={() => removeSection(selectedSection)}
+                onAddPage={() => addPage(selectedSection)}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-center">
+                <div>
+                  <p className="text-gray-400">Select a section or page from the left panel</p>
+                  <p className="text-xs text-gray-300 mt-1">Or create a new section to get started</p>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {uncovered.length > 0 && items.length > 0 && (
-        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-          <p className="text-xs text-amber-700 font-medium">Questions assigned to pages that don&apos;t exist yet:</p>
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {uncovered.map(g => <button key={g} onClick={() => add(g)} className="text-[11px] bg-white border border-amber-300 text-amber-700 px-2 py-0.5 rounded-lg hover:bg-amber-50">+ Create &ldquo;{g}&rdquo; page</button>)}
+            )}
           </div>
         </div>
       )}
 
       {dirty && <SaveBar onSave={save} />}
+    </div>
+  );
+}
+
+// ── Page Editor (right panel) ──
+
+function PageEditor({ page, questions: pageQuestions, allQuestions, sections, onUpdate, onRemove, onMoveToSection }: {
+  page: any; questions: Question[]; allQuestions: Question[]; sections: string[];
+  onUpdate: (u: any) => void; onRemove: () => void; onMoveToSection: (sec: string) => void;
+}) {
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none";
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">Page Settings</h3>
+        <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-600">Delete page</button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Page name" sub="Shown as the heading when this page is active">
+          <input value={page.name} onChange={e => onUpdate({ name: e.target.value })} className={ic} />
+        </Field>
+        <Field label="Section" sub="Which section this page belongs to">
+          <select value={page._section} onChange={e => onMoveToSection(e.target.value)} className={ic}>
+            {sections.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Description" sub="Optional text shown below the page heading">
+        <textarea value={page._text || ""} onChange={e => onUpdate({ _text: e.target.value })} className={`${ic} h-16 resize-y`} placeholder="Help the user understand what this page is about" />
+      </Field>
+
+      {/* Page Logic */}
+      <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-medium text-amber-700">Page Logic</span>
+          {page.condition && <button onClick={() => onUpdate({ condition: null })} className="text-[10px] text-amber-400 hover:text-amber-600">Clear</button>}
+        </div>
+        <p className="text-[10px] text-amber-600 mb-2">Only show this entire page when a condition is met. Leave empty to always show.</p>
+        <ConditionBuilder condition={page.condition || ""} questions={allQuestions} onChange={val => onUpdate({ condition: val || null })} />
+      </div>
+
+      {/* Questions on this page */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-medium text-gray-500">Questions on this page ({pageQuestions.length})</span>
+        </div>
+        {pageQuestions.length === 0 ? (
+          <div className="p-4 border border-dashed border-gray-200 rounded-xl text-center">
+            <p className="text-xs text-gray-400">No questions assigned yet</p>
+            <p className="text-[10px] text-gray-300 mt-0.5">Go to the Questions tab and set a question&apos;s &ldquo;Page&rdquo; to &ldquo;{page.name}&rdquo;</p>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {pageQuestions.map((q, i) => {
+              const ti = QUESTION_TYPES.find(t => t.value === q.type);
+              return (
+                <div key={q.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg">
+                  <span className="text-xs text-gray-400">{i + 1}.</span>
+                  <span className="w-5 h-5 bg-white rounded flex items-center justify-center text-[10px]">{ti?.icon}</span>
+                  <span className="text-sm text-gray-700 flex-1 truncate">{q.displayLabel}</span>
+                  {q.required && <span className="text-[9px] text-red-400">req</span>}
+                  {q.condition && <span className="w-1.5 h-1.5 bg-amber-400 rounded-full" />}
+                  <span className="text-[10px] text-gray-300">{ti?.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Section Editor (right panel) ──
+
+function SectionEditor({ name, pages: sectionPages, questions, onRename, onRemove, onAddPage }: {
+  name: string; pages: any[]; questions: Question[];
+  onRename: (n: string) => void; onRemove: () => void; onAddPage: () => void;
+}) {
+  const [editName, setEditName] = useState(name);
+  useEffect(() => setEditName(name), [name]);
+
+  const totalQuestions = sectionPages.reduce((sum, p) => sum + questions.filter(q => q.groupName === p.name).length, 0);
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none";
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-700">Section Settings</h3>
+        <button onClick={onRemove} className="text-xs text-red-400 hover:text-red-600">Delete section</button>
+      </div>
+
+      <Field label="Section name" sub="Shown in the progress sidebar during the interview">
+        <input value={editName} onChange={e => setEditName(e.target.value)} onBlur={() => onRename(editName)} onKeyDown={e => { if (e.key === "Enter") onRename(editName); }} className={ic} />
+      </Field>
+
+      <div className="flex gap-4 text-sm text-gray-500">
+        <span>{sectionPages.length} page{sectionPages.length !== 1 ? "s" : ""}</span>
+        <span>{totalQuestions} question{totalQuestions !== 1 ? "s" : ""} total</span>
+      </div>
+
+      {/* Pages in this section */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-medium text-gray-500">Pages in this section</span>
+          <button onClick={onAddPage} className="text-[10px] text-brand-600 hover:text-brand-700 font-medium">+ Add page</button>
+        </div>
+        {sectionPages.length === 0 ? (
+          <div className="p-4 border border-dashed border-gray-200 rounded-xl text-center">
+            <p className="text-xs text-gray-400">No pages in this section yet</p>
+            <button onClick={onAddPage} className="text-xs text-brand-500 mt-1">Add a page</button>
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {sectionPages.map((p, i) => {
+              const pqs = questions.filter(q => q.groupName === p.name);
+              return (
+                <div key={p.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg">
+                  <span className="w-5 h-5 bg-brand-50 text-brand-700 rounded flex items-center justify-center text-[10px] font-bold">{i + 1}</span>
+                  <span className="text-sm text-gray-700 flex-1 truncate">{p.name}</span>
+                  <span className="text-[10px] text-gray-400">{pqs.length} Q</span>
+                  {p.condition && <span className="text-[9px] text-amber-500">conditional</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* What users see */}
+      <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+        <p className="text-xs text-blue-700 font-medium">What the end user sees</p>
+        <p className="text-[10px] text-blue-600 mt-1">
+          &ldquo;{name}&rdquo; appears in the progress sidebar as a broad category.
+          When the user reaches this section, they step through its {sectionPages.length} page{sectionPages.length !== 1 ? "s" : ""} one at a time.
+          {sectionPages.length > 0 && ` First page: "${sectionPages[0].name}".`}
+        </p>
+      </div>
     </div>
   );
 }
