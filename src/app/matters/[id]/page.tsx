@@ -27,7 +27,23 @@ export default function MatterDetailPage() {
   useEffect(() => { if (authLoading || !session) return; reload().then(() => setLoading(false)).catch(() => setLoading(false)); }, [matterId, authLoading, session]);
 
   const handleDownload = async (docId: string) => {
-    try { const { url, fileName } = await api.getDownloadUrl(docId); const a = document.createElement("a"); a.href = url; a.download = fileName; a.click(); }
+    try {
+      const { supabase } = await import("@/lib/supabase");
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app";
+      const res = await fetch(`${apiUrl}/api/engine/download/${docId}`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({ error: res.statusText }))).error);
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const fileNameMatch = disposition.match(/filename="([^"]+)"/);
+      const fileName = fileNameMatch ? fileNameMatch[1] : "document.docx";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = fileName; a.click();
+      URL.revokeObjectURL(url);
+    }
     catch (err: any) { alert("Download failed: " + err.message); }
   };
 
