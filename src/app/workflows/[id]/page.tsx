@@ -2167,32 +2167,7 @@ function PreviewTab({ pages, questions }: { pages: Page[]; questions: Question[]
                 {q.helpText && <p className="text-xs text-gray-400 leading-relaxed">{q.helpText}</p>}
 
                 {q.type === "repeating" ? (
-                  <div className="mt-2">
-                    {/* Repeating item preview with sub-questions */}
-                    <div className="border border-gray-200 rounded-xl overflow-hidden">
-                      <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
-                        <span className="text-xs font-medium text-gray-600">{q.validation?.itemLabel || "Item"} 1</span>
-                        <span className="text-[10px] text-gray-400">of 1</span>
-                      </div>
-                      <div className="p-4 space-y-4">
-                        {subs.length > 0 ? subs.map(sq => (
-                          <div key={sq.id}>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">
-                              {sq.displayLabel}
-                              {sq.required && <span className="text-red-400 ml-0.5">*</span>}
-                              {sq.condition && <span className="text-[10px] text-amber-500 ml-1">(conditional)</span>}
-                            </label>
-                            <PreviewInput type={sq.type} validation={sq.validation} />
-                          </div>
-                        )) : (
-                          <p className="text-xs text-gray-400 italic">No sub-fields defined yet. Add them in the Questions tab.</p>
-                        )}
-                      </div>
-                    </div>
-                    <button className="mt-2 w-full py-2 border border-dashed border-gray-300 rounded-xl text-sm text-gray-400 hover:border-brand-300 hover:text-brand-500 transition-colors">
-                      + Add another {q.validation?.itemLabel || "item"}
-                    </button>
-                  </div>
+                  <RepeatingItemPreview q={q} subs={subs} />
                 ) : (
                   <div className="mt-1">
                     <PreviewInput type={q.type} validation={q.validation} />
@@ -2219,6 +2194,56 @@ function PreviewTab({ pages, questions }: { pages: Page[]; questions: Question[]
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function RepeatingItemPreview({ q, subs }: { q: Question; subs: Question[] }) {
+  const itemLabel = q.validation?.itemLabel || "Item";
+  const minItems = q.validation?.minItems || 1;
+  const maxItems = q.validation?.maxItems || 99;
+  const [itemCount, setItemCount] = useState(Math.max(1, minItems));
+
+  const addItem = () => { if (itemCount < maxItems) setItemCount(c => c + 1); };
+  const removeItem = (idx: number) => { if (itemCount > minItems) setItemCount(c => c - 1); };
+
+  const itemIndices: number[] = [];
+  for (let i = 0; i < itemCount; i++) itemIndices.push(i);
+
+  return (
+    <div className="mt-2 space-y-2">
+      {itemIndices.map((idx) => (
+        <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden">
+          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-600">{itemLabel} {idx + 1}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-gray-400">of {itemCount}</span>
+              {itemCount > minItems && (
+                <button type="button" onClick={() => removeItem(idx)} className="text-[10px] text-red-400 hover:text-red-600">Remove</button>
+              )}
+            </div>
+          </div>
+          <div className="p-4 space-y-4">
+            {subs.length > 0 ? subs.map(sq => (
+              <div key={`${idx}-${sq.id}`}>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  {sq.displayLabel}
+                  {sq.required && <span className="text-red-400 ml-0.5">*</span>}
+                  {sq.condition && <span className="text-[10px] text-amber-500 ml-1">(conditional)</span>}
+                </label>
+                <PreviewInput type={sq.type} validation={sq.validation} />
+              </div>
+            )) : (
+              <p className="text-xs text-gray-400 italic">No sub-fields defined yet. Add them in the Questions tab.</p>
+            )}
+          </div>
+        </div>
+      ))}
+      {itemCount < maxItems && (
+        <button type="button" onClick={addItem} className="w-full py-2.5 border border-dashed border-gray-300 rounded-xl text-sm text-gray-400 hover:border-brand-300 hover:text-brand-500 hover:bg-brand-50/20 transition-colors">
+          + Add another {itemLabel.toLowerCase()}
+        </button>
+      )}
     </div>
   );
 }
