@@ -103,7 +103,7 @@ class ApiClient {
     const { supabase } = await import("./supabase");
     const session = await supabase.auth.getSession();
     const token = session.data.session?.access_token;
-    const res = await fetch(`${this.baseUrl}/api/engine/sample-template/${workflowId}`, {
+    const res = await fetch(`${API_URL}/api/engine/sample-template/${workflowId}`, {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
     });
