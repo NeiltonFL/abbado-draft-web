@@ -264,9 +264,11 @@ function DocumentCard({ doc, onDownload, matterId, journal, onLoadJournal, onRel
     <div className="rounded-xl border border-gray-200 overflow-hidden hover:border-brand-200 transition-colors">
       <div className="flex items-center justify-between p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-lg">📄</div>
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-lg ${doc.template?.format === "pdf" ? "bg-red-50 text-red-600 text-xs font-bold" : "bg-blue-50 text-blue-600"}`}>
+            {doc.template?.format === "pdf" ? "PDF" : "📄"}
+          </div>
           <div>
-            <p className="text-sm font-medium text-gray-900">{doc.template?.name}</p>
+            <p className="text-sm font-medium text-gray-900">{(doc.variableSnapshot as any)?._displayName || doc.template?.name}</p>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[10px] text-gray-400">{doc.template?.format?.toUpperCase()}</span>
               <span className="text-[10px] text-gray-300">·</span>

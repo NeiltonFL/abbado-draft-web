@@ -1936,6 +1936,7 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
   const fileRef = useRef<HTMLInputElement>(null);
 
   const available = allTemplates.filter(t => !templates.some((wt: any) => wt.template?.id === t.id));
+  const repeatingQuestions = questions.filter(q => q.type === "repeating");
 
   const addExisting = async (templateId: string) => {
     try { await api.addTemplateToWorkflow(workflowId, templateId, templates.length + 1); setShowAdd(false); await onUpdate(); flash("Template added"); } catch (err: any) { flash("Error: " + err.message); }
@@ -1948,11 +1949,13 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
       const buffer = await file.arrayBuffer(); const bytes = new Uint8Array(buffer);
       let binary = ""; for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
       const base64 = btoa(binary);
-      const tmpl = await api.createTemplate({ name: file.name.replace(/\.[^.]+$/, ""), format: file.name.split(".").pop()?.toLowerCase() || "docx" });
+      const ext = file.name.split(".").pop()?.toLowerCase() || "docx";
+      const tmpl = await api.createTemplate({ name: file.name.replace(/\.[^.]+$/, ""), format: ext });
       const result = await api.parseTemplate(base64, file.name, tmpl.id);
       await api.addTemplateToWorkflow(workflowId, tmpl.id, templates.length + 1);
       setShowAdd(false); await onUpdate();
-      flash(`Template added — ${result.summary.totalVariables} variables detected`);
+      const count = result.summary?.totalVariables || result.fields?.length || 0;
+      flash(`Template added — ${count} ${ext === "pdf" ? "form fields" : "variables"} detected`);
     } catch (err: any) { flash("Error: " + err.message); }
     finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
   };
@@ -1962,13 +1965,25 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
     try { await api.removeTemplateFromWorkflow(workflowId, wtId); await onUpdate(); flash("Template removed"); } catch (err: any) { flash("Error: " + err.message); }
   };
 
+  const patchMapping = async (wt: any, updates: Record<string, any>) => {
+    try {
+      const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/workflows/${workflowId}/templates/${wt.id}/mapping`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ variableMapping: { ...(wt.variableMapping || {}), ...updates } }),
+      });
+      await onUpdate();
+    } catch (err: any) { flash("Error: " + err.message); }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-sm font-medium text-gray-700">Output Documents</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            These are the Word templates that get generated when a user completes the interview. You can add <strong>document logic</strong> to control which documents are generated based on answers.
+            Templates that get generated when a user completes the interview. Configure <strong>generation logic</strong>, <strong>per-item repeating</strong>, and <strong>output naming</strong> per document.
           </p>
         </div>
         <div className="flex gap-2">
@@ -1981,31 +1996,34 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
       </div>
 
       {templates.length === 0 ? (
-        <Empty title="No output documents" desc="Upload your Word templates (.docx). Variables inside them ({{company_name}}) will be auto-detected and filled with interview answers." action="Add your first template" onAction={() => setShowAdd(true)} />
+        <Empty title="No output documents" desc="Upload Word (.docx) or PDF (.pdf) templates. Variables inside them will be auto-detected and filled with interview answers." action="Add your first template" onAction={() => setShowAdd(true)} />
       ) : (
         <div className="space-y-3">
           {templates.map((wt: any, i: number) => {
-            const vars = (wt.template?.parsedSchema as any)?.variables || [];
-            const docCondition = (wt.variableMapping as any)?.generateCondition || "";
+            const vars = (wt.template?.parsedSchema as any)?.variables || (wt.template?.parsedSchema as any)?.fields || [];
+            const mapping = (wt.variableMapping || {}) as Record<string, any>;
+            const docCondition = mapping.generateCondition || "";
+            const repeatOver = mapping.repeatOver || "";
+            const outputName = mapping.outputName || "";
+            const isPdf = wt.template?.format === "pdf";
+
             return (
               <div key={wt.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden group hover:border-brand-200 transition-colors">
                 <div className="p-4 flex items-start gap-4">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center text-sm font-bold shrink-0">📄</div>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${isPdf ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"}`}>
+                    {isPdf ? "PDF" : "📄"}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-gray-900">{wt.template?.name}</p>
                       {docCondition && <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">conditional</span>}
+                      {repeatOver && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">per {repeatOver}</span>}
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
                       <span className="uppercase font-medium">{wt.template?.format}</span>
-                      {vars.length > 0 && <span>{vars.length} variables detected</span>}
-                      {docCondition ? (
-                        <span className="text-amber-600">Only generated when conditions are met</span>
-                      ) : (
-                        <span className="text-green-600">Always generated</span>
-                      )}
+                      {vars.length > 0 && <span>{vars.length} {isPdf ? "form fields" : "variables"} detected</span>}
                     </div>
-                    {vars.length > 0 && (
+                    {!isPdf && vars.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {vars.slice(0, 8).map((v: any) => (
                           <span key={v.name} className={`text-[10px] px-1.5 py-0.5 rounded ${questions.some(q => q.name === v.name) ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
@@ -2015,7 +2033,7 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
                         {vars.length > 8 && <span className="text-[10px] text-gray-400">+{vars.length - 8}</span>}
                       </div>
                     )}
-                    {vars.length > 0 && (
+                    {!isPdf && vars.length > 0 && (
                       <p className="text-[10px] text-gray-400 mt-1">
                         <span className="text-green-600">{vars.filter((v: any) => questions.some(q => q.name === v.name)).length} matched</span>
                         {" / "}
@@ -2026,29 +2044,78 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
                   <button onClick={() => removeTmpl(wt.id)} className="text-xs text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100">Remove</button>
                 </div>
 
-                {/* Document Generation Logic */}
-                <div className="px-4 py-3 bg-gray-50/50 border-t border-gray-100">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Document Logic</span>
-                    <span className="text-[10px] text-gray-400">When should this document be generated?</span>
+                {/* ── Generation Settings ── */}
+                <div className="px-4 py-3 bg-gray-50/50 border-t border-gray-100 space-y-4">
+
+                  {/* Per-item repeat */}
+                  {repeatingQuestions.length > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Per-Item Generation</span>
+                        <span className="text-[10px] text-gray-400">Generate one document per item in a repeating group</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={!!repeatOver}
+                            onChange={(e) => patchMapping(wt, { repeatOver: e.target.checked ? repeatingQuestions[0]?.name : undefined })}
+                            className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                          />
+                          <span className="text-xs text-gray-600">Generate per item</span>
+                        </label>
+                        {repeatOver && (
+                          <select value={repeatOver}
+                            onChange={(e) => patchMapping(wt, { repeatOver: e.target.value })}
+                            className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
+                          >
+                            {repeatingQuestions.map(q => (
+                              <option key={q.name} value={q.name}>{q.displayLabel || q.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                      {repeatOver && (
+                        <p className="text-[10px] text-purple-500 mt-1">
+                          This will generate a separate document for each item in "{repeatingQuestions.find(q => q.name === repeatOver)?.displayLabel || repeatOver}".
+                          Use {"{{this.field}}"} in templates to reference the current item.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Output name */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Output Name</span>
+                      <span className="text-[10px] text-gray-400">Supports {"{{variables}}"}</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={outputName}
+                      placeholder={repeatOver
+                        ? `e.g., {{company_name}} - ${wt.template?.name} - {{this.founder_name}}`
+                        : `e.g., {{company_name}} - ${wt.template?.name}`
+                      }
+                      onChange={(e) => patchMapping(wt, { outputName: e.target.value || undefined })}
+                      className="w-full text-xs px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none placeholder:text-gray-300"
+                    />
+                    {!outputName && (
+                      <p className="text-[10px] text-gray-300 mt-1">Default: {wt.template?.name}{repeatOver ? " - [item name]" : ""}</p>
+                    )}
                   </div>
-                  <ConditionBuilder
-                    condition={docCondition}
-                    questions={questions}
-                    onChange={async (val) => {
-                      try {
-                        const token = (await (await import("@/lib/supabase")).supabase.auth.getSession()).data.session?.access_token;
-                        await fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://abbado-draft-production.up.railway.app"}/api/workflows/${workflowId}/templates/${wt.id}/mapping`, {
-                          method: "PATCH",
-                          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-                          body: JSON.stringify({ variableMapping: { ...(wt.variableMapping || {}), generateCondition: val || undefined } }),
-                        });
-                        await onUpdate();
-                        flash(val ? "Document condition saved" : "Document condition removed — will always generate");
-                      } catch (err: any) { flash("Error: " + err.message); }
-                    }}
-                  />
-                  {!docCondition && <p className="text-[10px] text-gray-300 mt-1">No conditions — this document is always generated. Add a condition to only generate it when certain answers are given.</p>}
+
+                  {/* Document generation condition */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Document Logic</span>
+                      <span className="text-[10px] text-gray-400">When should this document be generated?</span>
+                    </div>
+                    <ConditionBuilder
+                      condition={docCondition}
+                      questions={questions}
+                      onChange={(val) => patchMapping(wt, { generateCondition: val || undefined })}
+                    />
+                    {!docCondition && <p className="text-[10px] text-gray-300 mt-1">No conditions — always generated.</p>}
+                  </div>
                 </div>
               </div>
             );
@@ -2057,15 +2124,15 @@ function DocumentsTab({ workflowId, templates, allTemplates, questions, onUpdate
       )}
 
       {showAdd && (
-        <Modal onClose={() => setShowAdd(false)} title="Add output document" subtitle="Upload a Word template or select from your library">
+        <Modal onClose={() => setShowAdd(false)} title="Add output document" subtitle="Upload a Word or PDF template, or select from your library">
           <div className="mb-5">
             <label className="flex items-center justify-center w-full h-28 border-2 border-dashed border-gray-300 rounded-xl hover:border-brand-400 hover:bg-brand-50/20 cursor-pointer transition-all">
               <div className="text-center">
                 <p className="text-2xl mb-1">📄</p>
-                <p className="text-sm text-gray-500">{uploading ? "Parsing template..." : "Upload .docx template"}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Variables like {"{{company_name}}"} will be auto-detected</p>
+                <p className="text-sm text-gray-500">{uploading ? "Parsing template..." : "Upload .docx or .pdf template"}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">.docx: {"{{variables}}"} auto-detected &nbsp;|&nbsp; .pdf: form fields auto-detected</p>
               </div>
-              <input ref={fileRef} type="file" accept=".docx" onChange={uploadNew} className="hidden" disabled={uploading} />
+              <input ref={fileRef} type="file" accept=".docx,.pdf" onChange={uploadNew} className="hidden" disabled={uploading} />
             </label>
           </div>
           {available.length > 0 && (
