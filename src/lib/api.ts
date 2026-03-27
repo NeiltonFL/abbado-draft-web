@@ -67,9 +67,6 @@ class ApiClient {
   deleteWorkflow(id: string) {
     return this.request<any>(`/api/workflows/${id}`, { method: "DELETE" });
   }
-  deleteMatter(id: string) {
-    return this.request<any>(`/api/matters/${id}`, { method: "DELETE" });
-  }
 
   // ── Matters ──
   getMatters(params?: { workflowId?: string; status?: string; search?: string }) {
