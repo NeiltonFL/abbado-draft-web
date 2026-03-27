@@ -69,21 +69,10 @@ export default function InterviewPage() {
     setValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Evaluate a condition (supports both legacy string and new JSON multi-condition format)
+  // Evaluate a condition (supports grouped, flat, and legacy string formats)
   const isVisible = (condition: string | null): boolean => {
     if (!condition) return true;
-    try {
-      // Try JSON format first (multi-condition)
-      const parsed = JSON.parse(condition);
-      if (parsed.conditions && Array.isArray(parsed.conditions)) {
-        const results = parsed.conditions.map((rule: any) => evalRule(rule, values));
-        return parsed.logic === "any" ? results.some(Boolean) : results.every(Boolean);
-      }
-    } catch {
-      // Legacy single-condition format
-      return evalLegacyCondition(condition, values);
-    }
-    return true;
+    return evalConditionData(condition, values);
   };
 
   // Save current progress
@@ -383,19 +372,47 @@ function VariableField({ variable, value, onChange }: { variable: Variable; valu
 
 // ── Condition evaluation helpers ──
 
-function evalRule(rule: { variable: string; operator: string; value: string }, values: Record<string, any>): boolean {
+function evalRule(rule: { variable: string; operator: string; value: string; negate?: boolean }, values: Record<string, any>): boolean {
   const actual = values[rule.variable];
   const actualStr = String(actual ?? "");
 
+  let result: boolean;
   switch (rule.operator) {
-    case "eq": return actualStr === rule.value;
-    case "neq": return actualStr !== rule.value;
-    case "gt": return Number(actual) > Number(rule.value);
-    case "lt": return Number(actual) < Number(rule.value);
-    case "truthy": return Boolean(actual) && actual !== "false" && actual !== "0" && actualStr !== "";
-    case "falsy": return !actual || actual === "false" || actual === "0" || actualStr === "";
-    default: return true;
+    case "eq": result = actualStr === rule.value; break;
+    case "neq": result = actualStr !== rule.value; break;
+    case "gt": result = Number(actual) > Number(rule.value); break;
+    case "lt": result = Number(actual) < Number(rule.value); break;
+    case "gte": result = Number(actual) >= Number(rule.value); break;
+    case "lte": result = Number(actual) <= Number(rule.value); break;
+    case "contains": result = actualStr.toLowerCase().includes(rule.value.toLowerCase()); break;
+    case "truthy": result = Boolean(actual) && actual !== "false" && actual !== "0" && actualStr !== ""; break;
+    case "falsy": result = !actual || actual === "false" || actual === "0" || actualStr === ""; break;
+    default: result = true;
   }
+  return rule.negate ? !result : result;
+}
+
+function evalConditionData(condition: string, values: Record<string, any>): boolean {
+  if (!condition) return true;
+  try {
+    const parsed = JSON.parse(condition);
+    // New grouped format
+    if (parsed.groups && Array.isArray(parsed.groups)) {
+      const groupResults = parsed.groups.map((group: any) => {
+        const ruleResults = group.rules.map((rule: any) => evalRule(rule, values));
+        const groupResult = group.logic === "any" ? ruleResults.some(Boolean) : ruleResults.every(Boolean);
+        return group.negate ? !groupResult : groupResult;
+      });
+      return parsed.groupLogic === "any" ? groupResults.some(Boolean) : groupResults.every(Boolean);
+    }
+    // Old flat format
+    if (parsed.conditions && Array.isArray(parsed.conditions)) {
+      const results = parsed.conditions.map((rule: any) => evalRule(rule, values));
+      return parsed.logic === "any" ? results.some(Boolean) : results.every(Boolean);
+    }
+  } catch {}
+  // Legacy string
+  return evalLegacyCondition(condition, values);
 }
 
 function evalLegacyCondition(condition: string, values: Record<string, any>): boolean {

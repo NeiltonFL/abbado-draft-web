@@ -60,15 +60,6 @@ const QUESTION_TYPES = [
   { value: "computed", label: "Calculation", icon: "ƒ", desc: "Auto-computed from other answers" },
 ];
 
-const OPERATORS = [
-  { value: "eq", label: "equals", symbol: "==" },
-  { value: "neq", label: "does not equal", symbol: "!=" },
-  { value: "gt", label: "greater than", symbol: ">" },
-  { value: "lt", label: "less than", symbol: "<" },
-  { value: "truthy", label: "is answered", symbol: "" },
-  { value: "falsy", label: "is not answered", symbol: "!" },
-];
-
 // ═══════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════
@@ -1918,86 +1909,271 @@ function OptionsEditor({ options, onChange, allowOther, onAllowOtherChange, isMu
 // ═══════════════════════════════════════════════════════════
 
 function ConditionBuilder({ condition, questions, onChange }: { condition: string; questions: Question[]; onChange: (v: string) => void }) {
-  // Parse condition: either JSON (multi-condition) or legacy string (single condition)
   const parsed = parseConditionData(condition);
 
-  const updateConditions = (data: ConditionData) => {
-    if (data.conditions.length === 0) { onChange(""); return; }
+  const save = (data: ConditionData) => {
+    if (data.groups.length === 0 || (data.groups.length === 1 && data.groups[0].rules.length === 0)) { onChange(""); return; }
     onChange(JSON.stringify(data));
   };
 
-  const addRule = () => {
-    updateConditions({ ...parsed, conditions: [...parsed.conditions, { variable: "", operator: "eq", value: "" }] });
+  const addGroup = () => {
+    save({ ...parsed, groups: [...parsed.groups, { logic: "all", negate: false, rules: [{ variable: "", operator: "eq", value: "", negate: false }] }] });
   };
 
-  const updateRule = (idx: number, updates: Partial<ConditionRule>) => {
-    const next = [...parsed.conditions];
-    next[idx] = { ...next[idx], ...updates };
-    updateConditions({ ...parsed, conditions: next });
+  const updateGroup = (gi: number, updates: Partial<ConditionGroup>) => {
+    const g = [...parsed.groups]; g[gi] = { ...g[gi], ...updates }; save({ ...parsed, groups: g });
   };
 
-  const removeRule = (idx: number) => {
-    updateConditions({ ...parsed, conditions: parsed.conditions.filter((_, i) => i !== idx) });
+  const removeGroup = (gi: number) => {
+    save({ ...parsed, groups: parsed.groups.filter((_, i) => i !== gi) });
   };
 
-  const toggleLogic = () => {
-    updateConditions({ ...parsed, logic: parsed.logic === "all" ? "any" : "all" });
+  const addRule = (gi: number) => {
+    const g = [...parsed.groups];
+    g[gi] = { ...g[gi], rules: [...g[gi].rules, { variable: "", operator: "eq", value: "", negate: false }] };
+    save({ ...parsed, groups: g });
+  };
+
+  const updateRule = (gi: number, ri: number, updates: Partial<ConditionRule>) => {
+    const g = [...parsed.groups];
+    const rules = [...g[gi].rules]; rules[ri] = { ...rules[ri], ...updates };
+    // Reset value when variable changes (new type might need different value)
+    if (updates.variable && updates.variable !== g[gi].rules[ri].variable) rules[ri].value = "";
+    g[gi] = { ...g[gi], rules };
+    save({ ...parsed, groups: g });
+  };
+
+  const removeRule = (gi: number, ri: number) => {
+    const g = [...parsed.groups];
+    g[gi] = { ...g[gi], rules: g[gi].rules.filter((_, i) => i !== ri) };
+    if (g[gi].rules.length === 0) g.splice(gi, 1);
+    save({ ...parsed, groups: g });
   };
 
   const ic = "px-2 py-1.5 border border-gray-200 rounded text-xs outline-none focus:ring-1 focus:ring-brand-400";
 
-  if (parsed.conditions.length === 0) {
+  if (parsed.groups.length === 0) {
     return (
-      <button type="button" onClick={addRule} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
-        + Add condition
-      </button>
+      <button type="button" onClick={() => save({ groupLogic: "all", groups: [{ logic: "all", negate: false, rules: [{ variable: "", operator: "eq", value: "", negate: false }] }] })}
+        className="text-xs text-brand-600 hover:text-brand-700 font-medium">+ Add condition</button>
     );
   }
 
   return (
     <div className="space-y-2">
-      {parsed.conditions.map((rule, i) => (
-        <div key={i} className="flex gap-1.5 items-center flex-wrap">
-          {i > 0 && (
-            <button type="button" onClick={toggleLogic}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${parsed.logic === "all" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>
-              {parsed.logic === "all" ? "AND" : "OR"}
-            </button>
+      {parsed.groups.map((group, gi) => (
+        <div key={gi}>
+          {/* Group connector */}
+          {gi > 0 && (
+            <div className="flex items-center gap-2 my-1.5">
+              <div className="flex-1 h-px bg-gray-200" />
+              <button type="button" onClick={() => save({ ...parsed, groupLogic: parsed.groupLogic === "all" ? "any" : "all" })}
+                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${parsed.groupLogic === "all" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>
+                {parsed.groupLogic === "all" ? "AND" : "OR"}
+              </button>
+              <div className="flex-1 h-px bg-gray-200" />
+            </div>
           )}
-          <select value={rule.variable} onChange={e => updateRule(i, { variable: e.target.value })} className={`${ic} flex-1 min-w-[130px]`}>
-            <option value="">Select question...</option>
-            {questions.map(q => <option key={q.name} value={q.name}>{q.displayLabel || q.name}</option>)}
-          </select>
-          <select value={rule.operator} onChange={e => updateRule(i, { operator: e.target.value })} className={ic}>
-            {OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          {!["truthy", "falsy"].includes(rule.operator) && (
-            <input value={rule.value} onChange={e => updateRule(i, { value: e.target.value })}
-              className={`${ic} flex-1 min-w-[80px]`} placeholder="value" />
-          )}
-          <button type="button" onClick={() => removeRule(i)} className="text-red-300 hover:text-red-500 text-xs px-1">✕</button>
+
+          {/* Group box */}
+          <div className={`rounded-lg border ${group.negate ? "border-red-200 bg-red-50/30" : "border-gray-200 bg-white"} p-2 space-y-1.5`}>
+            {/* Group header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <button type="button" onClick={() => updateGroup(gi, { negate: !group.negate })}
+                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${group.negate ? "bg-red-200 text-red-700" : "bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-600"}`}>
+                  {group.negate ? "NOT" : "not"}
+                </button>
+                {group.rules.length > 1 && (
+                  <button type="button" onClick={() => updateGroup(gi, { logic: group.logic === "all" ? "any" : "all" })}
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${group.logic === "all" ? "bg-blue-100 text-blue-700" : "bg-orange-100 text-orange-700"}`}>
+                    {group.logic === "all" ? "ALL match" : "ANY match"}
+                  </button>
+                )}
+              </div>
+              <button type="button" onClick={() => removeGroup(gi)} className="text-[10px] text-red-300 hover:text-red-500">Remove group</button>
+            </div>
+
+            {/* Rules */}
+            {group.rules.map((rule, ri) => {
+              const srcQ = questions.find(q => q.name === rule.variable);
+              const ops = getOperatorsForType(srcQ?.type);
+
+              return (
+                <div key={ri} className="flex gap-1.5 items-center flex-wrap">
+                  {ri > 0 && (
+                    <span className={`text-[9px] font-bold px-1.5 ${group.logic === "all" ? "text-blue-500" : "text-orange-500"}`}>
+                      {group.logic === "all" ? "AND" : "OR"}
+                    </span>
+                  )}
+                  {/* Negate per rule */}
+                  <button type="button" onClick={() => updateRule(gi, ri, { negate: !rule.negate })}
+                    className={`px-1 py-0.5 rounded text-[9px] font-bold shrink-0 ${rule.negate ? "bg-red-200 text-red-700" : "bg-gray-50 text-gray-300 hover:bg-red-50 hover:text-red-400"}`}>
+                    {rule.negate ? "NOT" : "not"}
+                  </button>
+                  {/* Variable */}
+                  <select value={rule.variable} onChange={e => updateRule(gi, ri, { variable: e.target.value })} className={`${ic} flex-1 min-w-[120px]`}>
+                    <option value="">Select question...</option>
+                    {questions.map(q => <option key={q.name} value={q.name}>{q.displayLabel || q.name}</option>)}
+                  </select>
+                  {/* Operator */}
+                  <select value={rule.operator} onChange={e => updateRule(gi, ri, { operator: e.target.value })} className={ic}>
+                    {ops.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  {/* Value — type-aware */}
+                  {!["truthy", "falsy"].includes(rule.operator) && (
+                    <TypeAwareValuePicker
+                      question={srcQ}
+                      value={rule.value}
+                      onChange={val => updateRule(gi, ri, { value: val })}
+                      className={`${ic} flex-1 min-w-[80px]`}
+                    />
+                  )}
+                  <button type="button" onClick={() => removeRule(gi, ri)} className="text-red-300 hover:text-red-500 text-xs px-0.5 shrink-0">✕</button>
+                </div>
+              );
+            })}
+            <button type="button" onClick={() => addRule(gi)} className="text-[10px] text-brand-500 hover:text-brand-700">+ Add rule</button>
+          </div>
         </div>
       ))}
-      <button type="button" onClick={addRule} className="text-[10px] text-brand-500 hover:text-brand-700">+ Add {parsed.conditions.length > 0 ? "another" : ""} condition</button>
+
+      <button type="button" onClick={addGroup} className="text-[10px] text-gray-400 hover:text-brand-600">
+        + Add condition group {parsed.groups.length > 0 ? "(ELSE IF)" : ""}
+      </button>
     </div>
   );
 }
 
-// Condition data types
-interface ConditionRule { variable: string; operator: string; value: string; }
-interface ConditionData { logic: "all" | "any"; conditions: ConditionRule[]; }
+// ── Type-aware value picker ──
+
+function TypeAwareValuePicker({ question, value, onChange, className }: {
+  question: Question | undefined; value: string; onChange: (v: string) => void; className: string;
+}) {
+  if (!question) return <input value={value} onChange={e => onChange(e.target.value)} className={className} placeholder="value" />;
+
+  switch (question.type) {
+    case "boolean":
+      return (
+        <div className="flex gap-1">
+          <button type="button" onClick={() => onChange("true")}
+            className={`px-2 py-1 rounded text-[10px] border ${value === "true" ? "bg-brand-50 border-brand-300 text-brand-700 font-medium" : "border-gray-200 text-gray-500"}`}>
+            {question.validation?.trueLabel || "Yes"}
+          </button>
+          <button type="button" onClick={() => onChange("false")}
+            className={`px-2 py-1 rounded text-[10px] border ${value === "false" ? "bg-brand-50 border-brand-300 text-brand-700 font-medium" : "border-gray-200 text-gray-500"}`}>
+            {question.validation?.falseLabel || "No"}
+          </button>
+        </div>
+      );
+
+    case "dropdown":
+    case "multi_select":
+    case "state":
+      const options = question.type === "state"
+        ? ["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming","District of Columbia"]
+        : question.validation?.options || [];
+      return (
+        <select value={value} onChange={e => onChange(e.target.value)} className={className}>
+          <option value="">Select...</option>
+          {options.map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+          {question.validation?.allowOther && <option value="__other__">Other</option>}
+        </select>
+      );
+
+    case "number":
+    case "currency":
+    case "percent":
+      return <input type="number" value={value} onChange={e => onChange(e.target.value)} className={className} placeholder="0" />;
+
+    case "date":
+      return <input type="date" value={value} onChange={e => onChange(e.target.value)} className={className} />;
+
+    default:
+      return <input value={value} onChange={e => onChange(e.target.value)} className={className} placeholder="value" />;
+  }
+}
+
+// ── Operators filtered by question type ──
+
+function getOperatorsForType(type?: string): { value: string; label: string }[] {
+  const base = [
+    { value: "truthy", label: "is answered" },
+    { value: "falsy", label: "is not answered" },
+  ];
+
+  switch (type) {
+    case "boolean":
+      return [
+        { value: "eq", label: "is" },
+        ...base,
+      ];
+
+    case "dropdown":
+    case "multi_select":
+    case "state":
+      return [
+        { value: "eq", label: "is" },
+        { value: "neq", label: "is not" },
+        { value: "contains", label: "includes" },
+        ...base,
+      ];
+
+    case "number":
+    case "currency":
+    case "percent":
+      return [
+        { value: "eq", label: "equals" },
+        { value: "neq", label: "does not equal" },
+        { value: "gt", label: "is greater than" },
+        { value: "lt", label: "is less than" },
+        { value: "gte", label: "is at least" },
+        { value: "lte", label: "is at most" },
+        ...base,
+      ];
+
+    case "date":
+      return [
+        { value: "eq", label: "is" },
+        { value: "gt", label: "is after" },
+        { value: "lt", label: "is before" },
+        ...base,
+      ];
+
+    default:
+      return [
+        { value: "eq", label: "equals" },
+        { value: "neq", label: "does not equal" },
+        { value: "contains", label: "contains" },
+        ...base,
+      ];
+  }
+}
+
+// ── Condition data types ──
+
+interface ConditionRule { variable: string; operator: string; value: string; negate: boolean; }
+interface ConditionGroup { logic: "all" | "any"; negate: boolean; rules: ConditionRule[]; }
+interface ConditionData { groupLogic: "all" | "any"; groups: ConditionGroup[]; }
 
 function parseConditionData(c: string): ConditionData {
-  if (!c) return { logic: "all", conditions: [] };
-  // Try JSON first (new multi-condition format)
+  if (!c) return { groupLogic: "all", groups: [] };
   try {
     const parsed = JSON.parse(c);
-    if (parsed.conditions && Array.isArray(parsed.conditions)) return parsed;
+    // New multi-group format
+    if (parsed.groups && Array.isArray(parsed.groups)) return parsed;
+    // Old multi-condition format — convert
+    if (parsed.conditions && Array.isArray(parsed.conditions)) {
+      return {
+        groupLogic: "all",
+        groups: [{ logic: parsed.logic || "all", negate: false, rules: parsed.conditions.map((r: any) => ({ ...r, negate: false })) }],
+      };
+    }
   } catch {}
-  // Legacy single-condition format
+  // Legacy string
   const legacy = parseCond(c);
-  if (legacy.v) return { logic: "all", conditions: [{ variable: legacy.v, operator: legacy.o, value: legacy.c }] };
-  return { logic: "all", conditions: [] };
+  if (legacy.v) return { groupLogic: "all", groups: [{ logic: "all", negate: false, rules: [{ variable: legacy.v, operator: legacy.o, value: legacy.c, negate: false }] }] };
+  return { groupLogic: "all", groups: [] };
 }
 
 function parseCond(c: string): { v: string; o: string; c: string } {
