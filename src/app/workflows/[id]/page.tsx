@@ -324,35 +324,7 @@ function QuestionRow({ q, ti, isEditing, onToggle, onUpdate, onRemove, onMove, o
               </Field>
 
               {/* Type-specific config */}
-              {(q.type === "dropdown" || q.type === "multi_select") && (
-                <Field label="Options" sub="One per line">
-                  <textarea value={(q.validation?.options || []).join("\n")} onChange={e => onUpdate({ validation: { ...q.validation, options: e.target.value.split("\n").filter(Boolean) } })} className={`${ic} h-24 resize-y`} placeholder={"Option A\nOption B\nOption C"} />
-                </Field>
-              )}
-              {q.type === "number" && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Field label="Min"><input type="number" value={q.validation?.min ?? ""} onChange={e => onUpdate({ validation: { ...q.validation, min: e.target.value ? Number(e.target.value) : undefined } })} className={ic} /></Field>
-                  <Field label="Max"><input type="number" value={q.validation?.max ?? ""} onChange={e => onUpdate({ validation: { ...q.validation, max: e.target.value ? Number(e.target.value) : undefined } })} className={ic} /></Field>
-                </div>
-              )}
-              {q.type === "text" && (
-                <Field label="Max characters"><input type="number" value={q.validation?.maxLength ?? ""} onChange={e => onUpdate({ validation: { ...q.validation, maxLength: e.target.value ? Number(e.target.value) : undefined } })} className={ic} placeholder="No limit" /></Field>
-              )}
-              {(q.type === "computed" || q.isComputed) && (
-                <Field label="Calculation formula" sub="e.g., total_shares * percent / 100">
-                  <textarea value={q.expression || ""} onChange={e => onUpdate({ expression: e.target.value })} className={`${ic} h-16 font-mono text-xs resize-y`} placeholder="authorized_shares - esop_shares" />
-                </Field>
-              )}
-              {q.type === "repeating" && (
-                <Field label="Item label" sub="What each item is called (e.g., 'Founder', 'Asset')">
-                  <input value={q.validation?.itemLabel || ""} onChange={e => onUpdate({ validation: { ...q.validation, itemLabel: e.target.value } })} className={ic} placeholder="e.g., Founder" />
-                </Field>
-              )}
-              {q.type === "info" && (
-                <Field label="Display text" sub="Rich text shown to the user (no input collected)">
-                  <textarea value={q.defaultValue || ""} onChange={e => onUpdate({ defaultValue: e.target.value })} className={`${ic} h-20 resize-y`} placeholder="Information or instructions for the user..." />
-                </Field>
-              )}
+              <TypeConfig q={q} onUpdate={onUpdate} ic={ic} allQuestions={allQuestions} />
             </div>
           </div>
 
@@ -791,6 +763,315 @@ function PreviewInput({ type, validation }: { type: string; validation: any }) {
     case "file_upload": return <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400">Click or drag to upload</div>;
     default: return <input type={type === "email" ? "email" : type === "number" || type === "currency" || type === "percent" ? "number" : type === "phone" ? "tel" : "text"} className={ic} />;
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TYPE-SPECIFIC CONFIG
+// ═══════════════════════════════════════════════════════════
+
+function TypeConfig({ q, onUpdate, ic, allQuestions }: {
+  q: Question; onUpdate: (u: Partial<Question>) => void; ic: string; allQuestions: Question[];
+}) {
+  const v = q.validation || {};
+  const setV = (updates: Record<string, any>) => onUpdate({ validation: { ...v, ...updates } });
+
+  switch (q.type) {
+    case "text":
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Max characters"><input type="number" value={v.maxLength ?? ""} onChange={e => setV({ maxLength: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="No limit" /></Field>
+            <Field label="Placeholder text"><input value={v.placeholder ?? ""} onChange={e => setV({ placeholder: e.target.value || undefined })} className={ic} placeholder="Shown when empty" /></Field>
+          </div>
+          <Field label="Pattern (regex)" sub="Optional validation pattern">
+            <input value={v.pattern ?? ""} onChange={e => setV({ pattern: e.target.value || undefined })} className={`${ic} font-mono text-xs`} placeholder="e.g., ^[A-Z].*Inc\\.?$" />
+          </Field>
+        </div>
+      );
+
+    case "rich_text":
+      return (
+        <Field label="Max characters"><input type="number" value={v.maxLength ?? ""} onChange={e => setV({ maxLength: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="No limit" /></Field>
+      );
+
+    case "number":
+      return (
+        <div className="grid grid-cols-3 gap-2">
+          <Field label="Min"><input type="number" value={v.min ?? ""} onChange={e => setV({ min: e.target.value ? Number(e.target.value) : undefined })} className={ic} /></Field>
+          <Field label="Max"><input type="number" value={v.max ?? ""} onChange={e => setV({ max: e.target.value ? Number(e.target.value) : undefined })} className={ic} /></Field>
+          <Field label="Decimals"><input type="number" min="0" max="10" value={v.decimals ?? ""} onChange={e => setV({ decimals: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="Any" /></Field>
+        </div>
+      );
+
+    case "currency":
+      return (
+        <div className="grid grid-cols-3 gap-2">
+          <Field label="Currency"><select value={v.currency ?? "USD"} onChange={e => setV({ currency: e.target.value })} className={ic}><option value="USD">$ USD</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option></select></Field>
+          <Field label="Min"><input type="number" value={v.min ?? ""} onChange={e => setV({ min: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="0.00" /></Field>
+          <Field label="Max"><input type="number" value={v.max ?? ""} onChange={e => setV({ max: e.target.value ? Number(e.target.value) : undefined })} className={ic} /></Field>
+        </div>
+      );
+
+    case "percent":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Min %"><input type="number" value={v.min ?? ""} onChange={e => setV({ min: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="0" /></Field>
+          <Field label="Max %"><input type="number" value={v.max ?? ""} onChange={e => setV({ max: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="100" /></Field>
+        </div>
+      );
+
+    case "date":
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Earliest date"><input type="date" value={v.minDate ?? ""} onChange={e => setV({ minDate: e.target.value || undefined })} className={ic} /></Field>
+            <Field label="Latest date"><input type="date" value={v.maxDate ?? ""} onChange={e => setV({ maxDate: e.target.value || undefined })} className={ic} /></Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={v.allowPast ?? true} onChange={e => setV({ allowPast: e.target.checked })} className="rounded border-gray-300" />
+            Allow past dates
+          </label>
+        </div>
+      );
+
+    case "boolean":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="'Yes' label"><input value={v.trueLabel ?? "Yes"} onChange={e => setV({ trueLabel: e.target.value })} className={ic} /></Field>
+          <Field label="'No' label"><input value={v.falseLabel ?? "No"} onChange={e => setV({ falseLabel: e.target.value })} className={ic} /></Field>
+        </div>
+      );
+
+    case "dropdown":
+    case "multi_select":
+      return <OptionsEditor options={v.options || []} onChange={opts => setV({ options: opts })} allowOther={v.allowOther ?? false} onAllowOtherChange={val => setV({ allowOther: val })} isMulti={q.type === "multi_select"} minSelections={v.minSelections} maxSelections={v.maxSelections} onMinChange={val => setV({ minSelections: val })} onMaxChange={val => setV({ maxSelections: val })} />;
+
+    case "email":
+      return (
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" checked={v.allowMultiple ?? false} onChange={e => setV({ allowMultiple: e.target.checked })} className="rounded border-gray-300" />
+          Allow multiple emails (comma-separated)
+        </label>
+      );
+
+    case "phone":
+      return (
+        <Field label="Format hint"><select value={v.format ?? "us"} onChange={e => setV({ format: e.target.value })} className={ic}><option value="us">US: (555) 555-5555</option><option value="international">International: +1 555-555-5555</option><option value="any">Any format</option></select></Field>
+      );
+
+    case "address":
+      return (
+        <div className="space-y-2">
+          <p className="text-xs text-gray-500">Address fields to collect:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { key: "street", label: "Street address" },
+              { key: "street2", label: "Address line 2" },
+              { key: "city", label: "City" },
+              { key: "state", label: "State" },
+              { key: "zip", label: "ZIP code" },
+              { key: "country", label: "Country" },
+              { key: "county", label: "County" },
+            ].map(f => (
+              <label key={f.key} className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={(v.fields || ["street", "city", "state", "zip"]).includes(f.key)} onChange={e => {
+                  const cur = v.fields || ["street", "city", "state", "zip"];
+                  setV({ fields: e.target.checked ? [...cur, f.key] : cur.filter((x: string) => x !== f.key) });
+                }} className="rounded border-gray-300" />
+                {f.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+
+    case "state":
+      return (
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" checked={v.includeTerritories ?? true} onChange={e => setV({ includeTerritories: e.target.checked })} className="rounded border-gray-300" />
+          Include territories (DC, Puerto Rico, Guam, USVI)
+        </label>
+      );
+
+    case "file_upload":
+      return (
+        <div className="space-y-3">
+          <Field label="Accepted file types" sub="Comma-separated extensions">
+            <input value={v.acceptedTypes ?? ".pdf,.docx,.jpg,.png"} onChange={e => setV({ acceptedTypes: e.target.value })} className={ic} placeholder=".pdf,.docx,.jpg,.png" />
+          </Field>
+          <Field label="Max file size (MB)"><input type="number" value={v.maxSizeMB ?? ""} onChange={e => setV({ maxSizeMB: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="10" /></Field>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={v.multiple ?? false} onChange={e => setV({ multiple: e.target.checked })} className="rounded border-gray-300" />
+            Allow multiple files
+          </label>
+        </div>
+      );
+
+    case "info":
+      return (
+        <Field label="Display content" sub="Text shown to the user (no input collected). Use this for instructions, explanations, or warnings.">
+          <textarea value={q.defaultValue || ""} onChange={e => onUpdate({ defaultValue: e.target.value })} className={`${ic} h-24 resize-y`} placeholder="Enter the information you want to display to the user..." />
+        </Field>
+      );
+
+    case "repeating":
+      return (
+        <div className="space-y-3">
+          <Field label="Item label" sub="What each item is called">
+            <input value={v.itemLabel || ""} onChange={e => setV({ itemLabel: e.target.value })} className={ic} placeholder="e.g., Founder, Child, Asset" />
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Min items"><input type="number" min="0" value={v.minItems ?? ""} onChange={e => setV({ minItems: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="0" /></Field>
+            <Field label="Max items"><input type="number" min="1" value={v.maxItems ?? ""} onChange={e => setV({ maxItems: e.target.value ? Number(e.target.value) : undefined })} className={ic} placeholder="No limit" /></Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={v.collectOnSeparatePage ?? false} onChange={e => setV({ collectOnSeparatePage: e.target.checked })} className="rounded border-gray-300" />
+            Collect each item on its own page
+          </label>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-700">Sub-questions for each {v.itemLabel || "item"} are defined by creating questions with names like <code className="bg-blue-100 px-1 rounded">{q.name}.$.field_name</code></p>
+            <p className="text-xs text-blue-600 mt-1">Example: <code className="bg-blue-100 px-1 rounded">{q.name}.$.name</code>, <code className="bg-blue-100 px-1 rounded">{q.name}.$.email</code>, <code className="bg-blue-100 px-1 rounded">{q.name}.$.shares</code></p>
+          </div>
+        </div>
+      );
+
+    case "computed":
+      return (
+        <div className="space-y-3">
+          <Field label="Calculation formula" sub="Reference other question variable names">
+            <textarea value={q.expression || ""} onChange={e => onUpdate({ expression: e.target.value })} className={`${ic} h-20 font-mono text-xs resize-y`} placeholder="e.g., authorized_shares - esop_shares" />
+          </Field>
+          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-1">
+            <p className="text-xs text-purple-700 font-medium">Available operators and functions:</p>
+            <p className="text-[10px] text-purple-600">Math: <code className="bg-purple-100 px-1 rounded">+</code> <code className="bg-purple-100 px-1 rounded">-</code> <code className="bg-purple-100 px-1 rounded">*</code> <code className="bg-purple-100 px-1 rounded">/</code> <code className="bg-purple-100 px-1 rounded">%</code> (modulo)</p>
+            <p className="text-[10px] text-purple-600">Functions: <code className="bg-purple-100 px-1 rounded">round(x)</code> <code className="bg-purple-100 px-1 rounded">floor(x)</code> <code className="bg-purple-100 px-1 rounded">ceil(x)</code> <code className="bg-purple-100 px-1 rounded">min(a,b)</code> <code className="bg-purple-100 px-1 rounded">max(a,b)</code></p>
+            <p className="text-[10px] text-purple-600">Date: <code className="bg-purple-100 px-1 rounded">days_between(date1, date2)</code> <code className="bg-purple-100 px-1 rounded">add_days(date, n)</code></p>
+          </div>
+          <Field label="Display format"><select value={v.displayFormat ?? "number"} onChange={e => setV({ displayFormat: e.target.value })} className={ic}><option value="number">Number</option><option value="currency">Currency ($)</option><option value="percent">Percentage (%)</option><option value="date">Date</option><option value="text">Text</option></select></Field>
+          {allQuestions.filter(aq => aq.id !== q.id && !aq.isComputed).length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Available variables:</p>
+              <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                {allQuestions.filter(aq => aq.id !== q.id && !aq.isComputed).map(aq => (
+                  <button key={aq.id} type="button" onClick={() => {
+                    const cur = q.expression || "";
+                    onUpdate({ expression: cur + (cur ? " " : "") + aq.name });
+                  }} className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded hover:bg-brand-50 hover:text-brand-600 cursor-pointer">
+                    {aq.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+
+    case "url":
+      return (
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input type="checkbox" checked={v.requireHttps ?? true} onChange={e => setV({ requireHttps: e.target.checked })} className="rounded border-gray-300" />
+          Require https://
+        </label>
+      );
+
+    default:
+      return null;
+  }
+}
+
+// ── Options Editor (for Dropdown / Multiple Choice) ──
+
+function OptionsEditor({ options, onChange, allowOther, onAllowOtherChange, isMulti, minSelections, maxSelections, onMinChange, onMaxChange }: {
+  options: string[]; onChange: (opts: string[]) => void;
+  allowOther: boolean; onAllowOtherChange: (v: boolean) => void;
+  isMulti: boolean; minSelections?: number; maxSelections?: number;
+  onMinChange: (v: number | undefined) => void; onMaxChange: (v: number | undefined) => void;
+}) {
+  const [newOption, setNewOption] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const addOption = () => {
+    const trimmed = newOption.trim();
+    if (!trimmed || options.includes(trimmed)) return;
+    onChange([...options, trimmed]);
+    setNewOption("");
+    inputRef.current?.focus();
+  };
+
+  const removeOption = (idx: number) => onChange(options.filter((_, i) => i !== idx));
+
+  const moveOption = (idx: number, dir: -1 | 1) => {
+    const ni = idx + dir;
+    if (ni < 0 || ni >= options.length) return;
+    const next = [...options];
+    [next[idx], next[ni]] = [next[ni], next[idx]];
+    onChange(next);
+  };
+
+  const renameOption = (idx: number, val: string) => {
+    const next = [...options];
+    next[idx] = val;
+    onChange(next);
+  };
+
+  const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none";
+
+  return (
+    <div className="space-y-3">
+      <Field label="Options" sub={`${options.length} option${options.length !== 1 ? "s" : ""}`}>
+        {/* Existing options */}
+        {options.length > 0 && (
+          <div className="space-y-1 mb-2">
+            {options.map((opt, i) => (
+              <div key={i} className="flex items-center gap-1.5 group">
+                <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100">
+                  <button type="button" onClick={() => moveOption(i, -1)} className="text-[9px] leading-none text-gray-400 hover:text-gray-600">▲</button>
+                  <button type="button" onClick={() => moveOption(i, 1)} className="text-[9px] leading-none text-gray-400 hover:text-gray-600">▼</button>
+                </div>
+                <span className="w-5 text-[10px] text-gray-300 text-center">{i + 1}.</span>
+                <input
+                  value={opt}
+                  onChange={e => renameOption(i, e.target.value)}
+                  className="flex-1 px-2 py-1 border border-transparent hover:border-gray-200 focus:border-brand-400 rounded text-sm outline-none focus:ring-1 focus:ring-brand-400"
+                />
+                <button type="button" onClick={() => removeOption(i)} className="text-red-300 hover:text-red-500 text-xs opacity-0 group-hover:opacity-100 px-1">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add new option */}
+        <div className="flex gap-2">
+          <input
+            ref={inputRef}
+            value={newOption}
+            onChange={e => setNewOption(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addOption(); } }}
+            className={ic}
+            placeholder={options.length === 0 ? "Type first option and press Enter" : "Type another option and press Enter"}
+          />
+          <button type="button" onClick={addOption} disabled={!newOption.trim()} className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200 disabled:opacity-30 shrink-0">
+            Add
+          </button>
+        </div>
+      </Field>
+
+      {/* Additional settings */}
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input type="checkbox" checked={allowOther} onChange={e => onAllowOtherChange(e.target.checked)} className="rounded border-gray-300" />
+          Allow &ldquo;Other&rdquo; (free text)
+        </label>
+      </div>
+
+      {isMulti && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Min selections"><input type="number" min="0" value={minSelections ?? ""} onChange={e => onMinChange(e.target.value ? Number(e.target.value) : undefined)} className={ic} placeholder="0" /></Field>
+          <Field label="Max selections"><input type="number" min="1" value={maxSelections ?? ""} onChange={e => onMaxChange(e.target.value ? Number(e.target.value) : undefined)} className={ic} placeholder="No limit" /></Field>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════
