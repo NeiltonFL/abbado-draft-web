@@ -223,7 +223,7 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
       for (const q of items) {
         flat.push({
           name: q.name, displayLabel: q.displayLabel,
-          type: q.type === "repeating" || q.type === "info" || q.type === "file_upload" || q.type === "computed" ? "text" : q.type,
+          type: q.type,
           required: q.required, defaultValue: q.defaultValue,
           validation: q.validation,
           helpText: q.helpText, condition: q.condition, groupName: q.groupName,
