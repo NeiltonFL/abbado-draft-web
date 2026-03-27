@@ -83,6 +83,11 @@ class ApiClient {
   }
   getMatterDocuments(matterId: string) { return this.request<any[]>(`/api/matters/${matterId}/documents`); }
   getEditJournal(matterId: string, docId: string) { return this.request<any[]>(`/api/matters/${matterId}/documents/${docId}/journal`); }
+  uploadEditedDocument(matterId: string, docId: string, fileBase64: string) {
+    return this.request<any>(`/api/matters/${matterId}/documents/${docId}/upload-edited`, {
+      method: "POST", body: JSON.stringify({ fileBase64 }),
+    });
+  }
 
   // ── Engine ──
   parseTemplate(fileBase64: string, fileName: string, templateId?: string) {
