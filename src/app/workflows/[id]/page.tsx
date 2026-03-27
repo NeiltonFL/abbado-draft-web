@@ -2204,22 +2204,19 @@ function RepeatingItemPreview({ q, subs }: { q: Question; subs: Question[] }) {
   const maxItems = q.validation?.maxItems || 99;
   const [itemCount, setItemCount] = useState(Math.max(1, minItems));
 
-  const addItem = () => { if (itemCount < maxItems) setItemCount(c => c + 1); };
-  const removeItem = (idx: number) => { if (itemCount > minItems) setItemCount(c => c - 1); };
-
-  const itemIndices: number[] = [];
-  for (let i = 0; i < itemCount; i++) itemIndices.push(i);
+  const addItem = () => setItemCount(c => Math.min(c + 1, maxItems));
+  const removeItem = () => setItemCount(c => Math.max(c - 1, minItems));
 
   return (
     <div className="mt-2 space-y-2">
-      {itemIndices.map((idx) => (
+      {Array.from({ length: itemCount }, (_, idx) => (
         <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden">
-          <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
+          <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200 flex items-center justify-between">
             <span className="text-xs font-medium text-gray-600">{itemLabel} {idx + 1}</span>
             <div className="flex items-center gap-3">
-              <span className="text-[10px] text-gray-400">of {itemCount}</span>
+              <span className="text-[10px] text-gray-400">{idx + 1} of {itemCount}</span>
               {itemCount > minItems && (
-                <button type="button" onClick={() => removeItem(idx)} className="text-[10px] text-red-400 hover:text-red-600">Remove</button>
+                <button type="button" onClick={removeItem} className="text-[10px] text-red-400 hover:text-red-600 transition-colors">Remove</button>
               )}
             </div>
           </div>
@@ -2240,8 +2237,12 @@ function RepeatingItemPreview({ q, subs }: { q: Question; subs: Question[] }) {
         </div>
       ))}
       {itemCount < maxItems && (
-        <button type="button" onClick={addItem} className="w-full py-2.5 border border-dashed border-gray-300 rounded-xl text-sm text-gray-400 hover:border-brand-300 hover:text-brand-500 hover:bg-brand-50/20 transition-colors">
-          + Add another {itemLabel.toLowerCase()}
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); addItem(); }}
+          className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 font-medium hover:border-brand-400 hover:text-brand-600 hover:bg-brand-50/30 active:bg-brand-100/30 transition-all cursor-pointer"
+        >
+          + Add {itemLabel} {itemCount + 1}
         </button>
       )}
     </div>
