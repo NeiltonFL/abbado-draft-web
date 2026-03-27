@@ -195,8 +195,6 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
   }, [questions]);
 
   const pageNames = pages.map(p => p.name);
-  const groups = groupBy(items, q => q.groupName || "Unassigned");
-
   const add = (q: Question) => { setItems(p => [...p, q]); setDirty(true); setAdding(false); setEditing(q.id); };
   const update = (id: string, u: Partial<Question>) => { setItems(p => p.map(q => q.id === id ? { ...q, ...u } : q)); setDirty(true); };
   const remove = (id: string) => { if (!confirm("Delete this question?")) return; setItems(p => p.filter(q => q.id !== id)); setEditing(null); setDirty(true); };
@@ -259,6 +257,26 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
 
   const ti = (type: string) => QUESTION_TYPES.find(t => t.value === type);
 
+  // Page filter
+  const [filterPage, setFilterPage] = useState<string | null>(null); // null = all
+
+  // Build page tree from pages (parse section metadata)
+  const parsePageMeta = (p: Page): { section: string } => {
+    if (p.description && p.description.startsWith("{")) {
+      try { return { section: JSON.parse(p.description).section || "General" }; } catch {}
+    }
+    return { section: "General" };
+  };
+  const pageSections: Record<string, Page[]> = {};
+  for (const p of pages) {
+    const sec = parsePageMeta(p).section;
+    if (!pageSections[sec]) pageSections[sec] = [];
+    pageSections[sec].push(p);
+  }
+
+  const filteredItems = filterPage ? items.filter(q => q.groupName === filterPage) : items;
+  const filteredGroups = groupBy(filteredItems, q => q.groupName || "Unassigned");
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -277,25 +295,79 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
       {items.length === 0 ? (
         <Empty title="No questions yet" desc="Questions are the fields your users fill in. Each answer feeds into your document templates." action="Add your first question" onAction={() => setAdding(true)} />
       ) : (
-        <div className="space-y-6">
-          {Object.entries(groups).map(([pageName, qs]) => (
-            <div key={pageName}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{pageName}</span>
-                <div className="flex-1 h-px bg-gray-200" />
-                <span className="text-xs text-gray-400">{qs.length}</span>
+        <div className="flex gap-4">
+          {/* ── Left: Page filter sidebar ── */}
+          <div className="w-56 shrink-0">
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden sticky top-6">
+              <div className="p-2.5 border-b border-gray-100">
+                <button onClick={() => setFilterPage(null)}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors ${!filterPage ? "bg-brand-50 text-brand-700 font-medium" : "text-gray-600 hover:bg-gray-50"}`}>
+                  All questions <span className="float-right text-gray-400">{items.length}</span>
+                </button>
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-50 overflow-hidden">
-                {qs.map((q) => (
-                  <QuestionRow key={q.id} q={q} ti={ti} isEditing={editing === q.id}
-                    onToggle={() => setEditing(editing === q.id ? null : q.id)}
-                    onUpdate={(u) => update(q.id, u)} onRemove={() => remove(q.id)}
-                    onMove={(d) => move(q.id, d)} onDuplicate={() => duplicate(q.id)}
-                    allQuestions={items} pageNames={pageNames} />
+              <div className="p-2 space-y-0.5 max-h-[60vh] overflow-y-auto">
+                {Object.entries(pageSections).map(([sec, secPages]) => (
+                  <div key={sec}>
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider px-2.5 pt-2 pb-0.5">{sec}</p>
+                    {secPages.map(p => {
+                      const count = items.filter(q => q.groupName === p.name).length;
+                      return (
+                        <button key={p.id} onClick={() => setFilterPage(filterPage === p.name ? null : p.name)}
+                          className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between gap-1 ${filterPage === p.name ? "bg-brand-50 text-brand-700 font-medium" : "text-gray-600 hover:bg-gray-50"}`}>
+                          <span className="truncate">{p.name}</span>
+                          <span className={`shrink-0 ${count > 0 ? "text-gray-400" : "text-gray-300"}`}>{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ))}
+                {/* Unassigned */}
+                {items.some(q => !q.groupName || !pageNames.includes(q.groupName)) && (
+                  <div>
+                    <p className="text-[9px] font-semibold text-amber-500 uppercase tracking-wider px-2.5 pt-2 pb-0.5">Unassigned</p>
+                    <button onClick={() => setFilterPage("__unassigned__")}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors flex items-center justify-between gap-1 ${filterPage === "__unassigned__" ? "bg-amber-50 text-amber-700 font-medium" : "text-amber-600 hover:bg-amber-50/50"}`}>
+                      <span>No page assigned</span>
+                      <span>{items.filter(q => !q.groupName || !pageNames.includes(q.groupName)).length}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+          </div>
+
+          {/* ── Right: Question list ── */}
+          <div className="flex-1 min-w-0">
+            {filterPage && (
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className="text-xs text-brand-600 font-medium">
+                  Showing: {filterPage === "__unassigned__" ? "Unassigned questions" : filterPage}
+                  <span className="text-gray-400 font-normal"> ({(filterPage === "__unassigned__" ? items.filter(q => !q.groupName || !pageNames.includes(q.groupName)) : filteredItems).length})</span>
+                </span>
+                <button onClick={() => setFilterPage(null)} className="text-[10px] text-gray-400 hover:text-gray-600">Show all</button>
+              </div>
+            )}
+            <div className="space-y-6">
+              {Object.entries(filterPage === "__unassigned__" ? { "Unassigned": items.filter(q => !q.groupName || !pageNames.includes(q.groupName)) } : filteredGroups).map(([pageName, qs]) => (
+                <div key={pageName}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{pageName}</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-xs text-gray-400">{qs.length}</span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-50 overflow-hidden">
+                    {qs.map((q) => (
+                      <QuestionRow key={q.id} q={q} ti={ti} isEditing={editing === q.id}
+                        onToggle={() => setEditing(editing === q.id ? null : q.id)}
+                        onUpdate={(u) => update(q.id, u)} onRemove={() => remove(q.id)}
+                        onMove={(d) => move(q.id, d)} onDuplicate={() => duplicate(q.id)}
+                        allQuestions={items} pageNames={pageNames} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -513,6 +585,74 @@ function PagesTab({ workflowId, pages, questions, onUpdate, flash }: {
   const [addingSection, setAddingSection] = useState(false);
   const [newSectionName, setNewSectionName] = useState("");
 
+  // Drag and drop state
+  const [dragType, setDragType] = useState<"section" | "page" | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const onDragStartSection = (sec: string) => { setDragType("section"); setDragId(sec); };
+  const onDragStartPage = (pageId: string) => { setDragType("page"); setDragId(pageId); };
+
+  const onDragOverSection = (e: React.DragEvent, sec: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = dragType === "page" ? "move" : "move";
+    setDropTarget(`sec:${sec}`);
+  };
+
+  const onDragOverPage = (e: React.DragEvent, pageId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropTarget(`page:${pageId}`);
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!dragId || !dropTarget) { resetDrag(); return; }
+
+    if (dragType === "section" && dropTarget.startsWith("sec:")) {
+      const targetSec = dropTarget.replace("sec:", "");
+      if (dragId !== targetSec) {
+        setSections(prev => {
+          const from = prev.indexOf(dragId);
+          const to = prev.indexOf(targetSec);
+          if (from === -1 || to === -1) return prev;
+          const next = [...prev];
+          next.splice(from, 1);
+          next.splice(to, 0, dragId);
+          return next;
+        });
+        setDirty(true);
+      }
+    } else if (dragType === "page") {
+      if (dropTarget.startsWith("sec:")) {
+        // Drop page onto section = move to that section
+        const targetSec = dropTarget.replace("sec:", "");
+        movePageToSection(dragId, targetSec);
+      } else if (dropTarget.startsWith("page:")) {
+        // Drop page onto another page = reorder
+        const targetPageId = dropTarget.replace("page:", "");
+        if (dragId !== targetPageId) {
+          setItems(prev => {
+            const from = prev.findIndex(p => p.id === dragId);
+            const to = prev.findIndex(p => p.id === targetPageId);
+            if (from === -1 || to === -1) return prev;
+            const item = prev[from];
+            const targetSection = prev[to]._section;
+            const next = [...prev];
+            next.splice(from, 1);
+            const newTo = next.findIndex(p => p.id === targetPageId);
+            next.splice(newTo, 0, { ...item, _section: targetSection });
+            return next;
+          });
+          setDirty(true);
+        }
+      }
+    }
+    resetDrag();
+  };
+
+  const resetDrag = () => { setDragType(null); setDragId(null); setDropTarget(null); };
+
   // Load and parse
   useEffect(() => {
     const parsed = pages.map(p => {
@@ -687,7 +827,12 @@ function PagesTab({ workflowId, pages, questions, onUpdate, flash }: {
                   <div key={sec}>
                     {/* Section header */}
                     <div
-                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${isSelSec ? "bg-brand-50 ring-1 ring-brand-300" : "hover:bg-gray-50"}`}
+                      draggable
+                      onDragStart={() => onDragStartSection(sec)}
+                      onDragOver={(e) => onDragOverSection(e, sec)}
+                      onDrop={onDrop}
+                      onDragEnd={resetDrag}
+                      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-grab group transition-colors ${isSelSec ? "bg-brand-50 ring-1 ring-brand-300" : dropTarget === `sec:${sec}` ? "bg-brand-50 ring-1 ring-brand-300 ring-dashed" : "hover:bg-gray-50"}`}
                       onClick={() => { setSelectedSection(sec); setSelected(null); }}
                     >
                       <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
@@ -706,7 +851,12 @@ function PagesTab({ workflowId, pages, questions, onUpdate, flash }: {
                       return (
                         <div
                           key={p.id}
-                          className={`flex items-center gap-1.5 ml-5 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${isSel ? "bg-brand-50 ring-1 ring-brand-300" : "hover:bg-gray-50"}`}
+                          draggable
+                          onDragStart={() => onDragStartPage(p.id)}
+                          onDragOver={(e) => onDragOverPage(e, p.id)}
+                          onDrop={onDrop}
+                          onDragEnd={resetDrag}
+                          className={`flex items-center gap-1.5 ml-5 px-2 py-1.5 rounded-lg cursor-grab group transition-colors ${isSel ? "bg-brand-50 ring-1 ring-brand-300" : dropTarget === `page:${p.id}` ? "bg-blue-50 ring-1 ring-blue-300" : "hover:bg-gray-50"}`}
                           onClick={() => { setSelected(p.id); setSelectedSection(null); }}
                         >
                           <div className="flex flex-col gap-px opacity-0 group-hover:opacity-100" onClick={e => e.stopPropagation()}>
