@@ -775,7 +775,7 @@ function InterviewBuilder({ workflowId, sections, variables, onUpdate, setSaveSt
 
   useEffect(() => { setEditSections(sections); setDirty(false); }, [sections]);
 
-  const varGroups = [...new Set(variables.map((v: any) => v.groupName).filter(Boolean))] as string[];
+  const varGroups = Array.from(new Set(variables.map((v: any) => v.groupName).filter(Boolean))) as string[];
   const uncovered = varGroups.filter(g => !editSections.some((s: any) => s.name === g));
 
   const addSection = (name: string, desc?: string) => {
