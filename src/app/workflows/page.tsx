@@ -58,26 +58,47 @@ export default function WorkflowsPage() {
         ) : (
           <div className="grid grid-cols-2 gap-4">
             {workflows.map((w) => (
-              <Link
-                key={w.id}
-                href={`/workflows/${w.id}`}
-                className="bg-white rounded-xl border border-gray-200 p-5 hover:border-brand-300 hover:shadow-sm transition-all"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-900">{w.name}</h3>
-                    {w.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{w.description}</p>}
+              <div key={w.id} className="bg-white rounded-xl border border-gray-200 p-5 hover:border-brand-300 hover:shadow-sm transition-all group relative">
+                <Link href={`/workflows/${w.id}`} className="block">
+                  <div className="flex items-start justify-between">
+                    <div className="min-w-0 pr-8">
+                      <h3 className="text-sm font-medium text-gray-900">{w.name}</h3>
+                      {w.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{w.description}</p>}
+                    </div>
+                    {w.category && (
+                      <span className="text-xs px-2 py-0.5 bg-brand-50 text-brand-700 rounded-full shrink-0">{w.category}</span>
+                    )}
                   </div>
-                  {w.category && (
-                    <span className="text-xs px-2 py-0.5 bg-brand-50 text-brand-700 rounded-full">{w.category}</span>
-                  )}
+                  <div className="flex items-center gap-4 mt-4 text-xs text-gray-400">
+                    <span>{w._count?.templates || 0} templates</span>
+                    <span>{w._count?.variables || 0} variables</span>
+                    <span>{w._count?.matters || 0} matters</span>
+                  </div>
+                </Link>
+                {/* Actions */}
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                  <button onClick={async (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    try {
+                      await api.duplicateWorkflow(w.id);
+                      const wfs = await api.getWorkflows();
+                      setWorkflows(wfs);
+                    } catch (err: any) { alert("Error: " + err.message); }
+                  }} className="px-2 py-1 text-[10px] bg-gray-100 text-gray-500 rounded hover:bg-brand-50 hover:text-brand-600" title="Duplicate">
+                    Duplicate
+                  </button>
+                  <button onClick={async (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (!confirm(`Delete "${w.name}"? This cannot be undone.`)) return;
+                    try {
+                      await api.deleteWorkflow(w.id);
+                      setWorkflows(prev => prev.filter(x => x.id !== w.id));
+                    } catch (err: any) { alert("Error: " + err.message); }
+                  }} className="px-2 py-1 text-[10px] bg-gray-100 text-red-400 rounded hover:bg-red-50 hover:text-red-600" title="Delete">
+                    Delete
+                  </button>
                 </div>
-                <div className="flex items-center gap-4 mt-4 text-xs text-gray-400">
-                  <span>{w._count?.templates || 0} templates</span>
-                  <span>{w._count?.variables || 0} variables</span>
-                  <span>{w._count?.matters || 0} matters</span>
-                </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}

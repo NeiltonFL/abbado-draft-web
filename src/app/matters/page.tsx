@@ -60,14 +60,15 @@ export default function MattersPage() {
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Documents</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">Created</th>
+                  <th className="w-16"></th>
                 </tr>
               </thead>
               <tbody>
                 {(matters?.data || []).map((m: any) => (
-                  <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/matters/${m.id}`)}>
-                    <td className="px-4 py-3 font-medium text-gray-900">{m.name}</td>
-                    <td className="px-4 py-3 text-gray-500">{m.workflow?.name}</td>
-                    <td className="px-4 py-3">
+                  <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer group">
+                    <td className="px-4 py-3 font-medium text-gray-900" onClick={() => router.push(`/matters/${m.id}`)}>{m.name}</td>
+                    <td className="px-4 py-3 text-gray-500" onClick={() => router.push(`/matters/${m.id}`)}>{m.workflow?.name}</td>
+                    <td className="px-4 py-3" onClick={() => router.push(`/matters/${m.id}`)}>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
                         m.status === "complete" ? "bg-green-50 text-green-700" :
                         m.status === "in_progress" ? "bg-blue-50 text-blue-700" :
@@ -75,8 +76,20 @@ export default function MattersPage() {
                         "bg-gray-100 text-gray-600"
                       }`}>{m.status}</span>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{m._count?.generatedDocs || 0}</td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{new Date(m.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-gray-500" onClick={() => router.push(`/matters/${m.id}`)}>{m._count?.generatedDocs || 0}</td>
+                    <td className="px-4 py-3 text-gray-400 text-xs" onClick={() => router.push(`/matters/${m.id}`)}>{new Date(m.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3">
+                      <button onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Delete "${m.name}"? This will remove all generated documents.`)) return;
+                        try {
+                          await api.deleteMatter(m.id);
+                          setMatters((prev: any) => ({ ...prev, data: prev.data.filter((x: any) => x.id !== m.id) }));
+                        } catch (err: any) { alert("Error: " + err.message); }
+                      }} className="text-[10px] text-red-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                        Delete
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
