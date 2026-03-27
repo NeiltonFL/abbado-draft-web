@@ -255,7 +255,7 @@ function ReviewScreen({ interview, values, setValue, isVisible, allSubsByParent,
                               <div key={idx} className="bg-gray-50 rounded-lg px-3 py-2">
                                 <p className="text-[10px] text-gray-400 mb-0.5">{itemLabel} {idx + 1}</p>
                                 <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                                  {subList.map(sq => { const field = sq.name.split(".$.")[1]; return (<span key={sq.id} className="text-xs text-gray-700"><span className="text-gray-400">{sq.displayLabel}:</span> {String(item[field] || "\u2014")}</span>); })}
+                                  {subList.filter(sq => !sq.condition || evalConditionData(sq.condition, item)).map(sq => { const field = sq.name.split(".$.")[1]; const fv = item[field]; return fv !== undefined && fv !== null && fv !== "" ? (<span key={sq.id} className="text-xs text-gray-700"><span className="text-gray-400">{sq.displayLabel}:</span> {displayValue(fv, sq.type)}</span>) : null; })}
                                 </div>
                               </div>
                             ))}</div>
@@ -310,7 +310,11 @@ function InterviewField({ variable, subs, values, setValue }: { variable: Variab
                 {items.length > 1 && (<button type="button" onClick={() => { const next = items.filter((_, i) => i !== idx); setValue(v.name, next.length > 0 ? next : [{}]); }} className="text-[10px] text-red-400 hover:text-red-600">Remove</button>)}
               </div>
               <div className="p-4 space-y-4">
-                {subs.map(sq => { const field = sq.name.split(".$.")[1]; return (
+                {subs.filter(sq => {
+                  // Evaluate sub-question condition against THIS item's values
+                  if (!sq.condition) return true;
+                  return evalConditionData(sq.condition, item);
+                }).map(sq => { const field = sq.name.split(".$.")[1]; return (
                   <VariableField key={`${idx}-${sq.id}`} variable={sq} value={item[field] ?? ""} onChange={(val) => { const next = [...items]; next[idx] = { ...next[idx], [field]: val }; setValue(v.name, next); }} />
                 ); })}
               </div>
