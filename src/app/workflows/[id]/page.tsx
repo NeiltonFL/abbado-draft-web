@@ -62,7 +62,7 @@ export default function WorkflowBuilderPage() {
   const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"templates" | "variables" | "interview" | "logic">("templates");
-  const [saveStatus, setSaveStatus] = useState<"" | "saving" | "saved" | "error">("");
+  const [saveStatus, setSaveStatus] = useState<string>("");
 
   const reload = useCallback(async () => {
     const [w, t] = await Promise.all([
