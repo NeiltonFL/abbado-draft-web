@@ -1585,19 +1585,21 @@ function SubQuestionBuilder({ parentName, itemLabel, subQuestions, onChange }: {
   subQuestions: { field: string; label: string; type: string; required: boolean; helpText?: string; validation?: any; condition?: string }[];
   onChange: (subs: any[]) => void;
 }) {
-  const [addingField, setAddingField] = useState("");
   const [addingLabel, setAddingLabel] = useState("");
   const [addingType, setAddingType] = useState("text");
   const [expanded, setExpanded] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const add = () => {
-    const field = addingField.trim() || addingLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
     const label = addingLabel.trim();
-    if (!field || !label) return;
-    if (subQuestions.some(s => s.field === field)) return;
-    onChange([...subQuestions, { field, label, type: addingType, required: false }]);
-    setAddingField("");
+    if (!label) return;
+    const field = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    if (!field) return;
+    // Dedupe: append number if field already exists
+    let finalField = field;
+    let n = 2;
+    while (subQuestions.some(s => s.field === finalField)) { finalField = `${field}_${n}`; n++; }
+    onChange([...subQuestions, { field: finalField, label, type: addingType, required: false }]);
     setAddingLabel("");
     setAddingType("text");
     inputRef.current?.focus();
@@ -1774,7 +1776,7 @@ function SubQuestionBuilder({ parentName, itemLabel, subQuestions, onChange }: {
           <input
             ref={inputRef}
             value={addingLabel}
-            onChange={e => { setAddingLabel(e.target.value); if (!addingField) setAddingField(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "")); }}
+            onChange={e => setAddingLabel(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
             className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
             placeholder={`e.g., ${itemLabel} Name, Email, Shares...`}
