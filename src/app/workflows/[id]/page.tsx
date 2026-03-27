@@ -258,6 +258,44 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
   // Page filter
   const [filterPage, setFilterPage] = useState<string | null>(null); // null = all
 
+  // Drag and drop
+  const [dragQuestionId, setDragQuestionId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null); // question id or "page:PageName"
+
+  const onQuestionDragStart = (id: string) => setDragQuestionId(id);
+  const onQuestionDragOver = (e: React.DragEvent, targetId: string) => { e.preventDefault(); setDropTargetId(targetId); };
+  const onPageHeaderDragOver = (e: React.DragEvent, pageName: string) => { e.preventDefault(); setDropTargetId(`page:${pageName}`); };
+
+  const onQuestionDrop = () => {
+    if (!dragQuestionId || !dropTargetId) { resetQuestionDrag(); return; }
+
+    if (dropTargetId.startsWith("page:")) {
+      // Dropped onto a page header — reassign to that page
+      const targetPage = dropTargetId.replace("page:", "");
+      update(dragQuestionId, { groupName: targetPage === "Unassigned" ? null : targetPage });
+    } else if (dragQuestionId !== dropTargetId) {
+      // Dropped onto another question — reorder
+      setItems(prev => {
+        const fromIdx = prev.findIndex(q => q.id === dragQuestionId);
+        const toIdx = prev.findIndex(q => q.id === dropTargetId);
+        if (fromIdx === -1 || toIdx === -1) return prev;
+        const item = prev[fromIdx];
+        const next = [...prev];
+        next.splice(fromIdx, 1);
+        const newToIdx = next.findIndex(q => q.id === dropTargetId);
+        // Also adopt the target's page if dragging between groups
+        const targetPage = next[newToIdx]?.groupName;
+        if (targetPage !== item.groupName) item.groupName = targetPage;
+        next.splice(newToIdx, 0, item);
+        return next;
+      });
+      setDirty(true);
+    }
+    resetQuestionDrag();
+  };
+
+  const resetQuestionDrag = () => { setDragQuestionId(null); setDropTargetId(null); };
+
   // Build page tree from pages (parse section metadata)
   const parsePageMeta = (p: Page): { section: string } => {
     if (p.description && p.description.startsWith("{")) {
@@ -348,7 +386,11 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
             <div className="space-y-6">
               {Object.entries(filterPage === "__unassigned__" ? { "Unassigned": items.filter(q => !q.groupName || !pageNames.includes(q.groupName)) } : filteredGroups).map(([pageName, qs]) => (
                 <div key={pageName}>
-                  <div className="flex items-center gap-2 mb-2">
+                  <div
+                    className={`flex items-center gap-2 mb-2 rounded-lg px-1 py-0.5 transition-colors ${dropTargetId === `page:${pageName}` ? "bg-brand-50 ring-1 ring-brand-300" : ""}`}
+                    onDragOver={(e) => onPageHeaderDragOver(e, pageName)}
+                    onDrop={onQuestionDrop}
+                  >
                     <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{pageName}</span>
                     <div className="flex-1 h-px bg-gray-200" />
                     <span className="text-xs text-gray-400">{qs.length}</span>
@@ -359,7 +401,12 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
                         onToggle={() => setEditing(editing === q.id ? null : q.id)}
                         onUpdate={(u) => update(q.id, u)} onRemove={() => remove(q.id)}
                         onMove={(d) => move(q.id, d)} onDuplicate={() => duplicate(q.id)}
-                        allQuestions={items} pageNames={pageNames} />
+                        allQuestions={items} pageNames={pageNames}
+                        isDragOver={dropTargetId === q.id}
+                        onDragStart={() => onQuestionDragStart(q.id)}
+                        onDragOver={(e) => onQuestionDragOver(e, q.id)}
+                        onDrop={onQuestionDrop}
+                        onDragEnd={resetQuestionDrag} />
                     ))}
                   </div>
                 </div>
@@ -377,11 +424,12 @@ function QuestionsTab({ workflowId, questions, pages, onUpdate, flash }: {
 
 // ── Question Row ──
 
-function QuestionRow({ q, ti, isEditing, onToggle, onUpdate, onRemove, onMove, onDuplicate, allQuestions, pageNames }: {
+function QuestionRow({ q, ti, isEditing, onToggle, onUpdate, onRemove, onMove, onDuplicate, allQuestions, pageNames, isDragOver, onDragStart, onDragOver, onDrop, onDragEnd }: {
   q: Question; ti: (t: string) => any; isEditing: boolean;
   onToggle: () => void; onUpdate: (u: Partial<Question>) => void; onRemove: () => void;
   onMove: (d: -1 | 1) => void; onDuplicate: () => void;
   allQuestions: Question[]; pageNames: string[];
+  isDragOver?: boolean; onDragStart?: () => void; onDragOver?: (e: React.DragEvent) => void; onDrop?: () => void; onDragEnd?: () => void;
 }) {
   const typeInfo = ti(q.type);
   const ic = "w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none";
@@ -389,7 +437,15 @@ function QuestionRow({ q, ti, isEditing, onToggle, onUpdate, onRemove, onMove, o
   return (
     <div>
       {/* Collapsed */}
-      <div className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50/50 transition-colors ${isEditing ? "bg-brand-50/30" : ""}`} onClick={onToggle}>
+      <div
+        draggable={!isEditing}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
+        className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50/50 transition-colors ${isEditing ? "bg-brand-50/30 cursor-default" : "cursor-grab"} ${isDragOver ? "ring-1 ring-brand-400 bg-brand-50/20" : ""}`}
+        onClick={onToggle}
+      >
         <div className="flex flex-col gap-px opacity-30 hover:opacity-100" onClick={e => { e.stopPropagation(); }}>
           <button onClick={() => onMove(-1)} className="text-[10px] leading-none">▲</button>
           <button onClick={() => onMove(1)} className="text-[10px] leading-none">▼</button>
