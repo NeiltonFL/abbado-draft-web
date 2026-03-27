@@ -9,6 +9,7 @@ interface InterviewSection {
   id: string;
   name: string;
   description: string | null;
+  condition: string | null;
   variables: Variable[];
 }
 
