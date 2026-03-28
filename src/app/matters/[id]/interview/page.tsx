@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { AppShell } from "@/components/AppShell";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -35,7 +35,11 @@ export default function InterviewPage() {
   const [matter, setMatter] = useState<any>(null);
   const [interview, setInterview] = useState<{ workflowName?: string; sections: InterviewSection[] } | null>(null);
   const [values, setValues] = useState<Record<string, any>>({});
+  const valuesRef = useRef(values);
+  valuesRef.current = values; // Always points to latest values
   const [currentSection, setCurrentSection] = useState(0);
+  const currentSectionRef = useRef(currentSection);
+  currentSectionRef.current = currentSection;
   const [mode, setMode] = useState<"interview" | "review">("interview");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -59,8 +63,8 @@ export default function InterviewPage() {
 
   const saveProgress = async () => {
     try {
-      await api.updateVariableValues(matterId, values, "interview");
-      await api.saveInterviewState(matterId, { currentSection, savedAt: new Date().toISOString() });
+      await api.updateVariableValues(matterId, valuesRef.current, "interview");
+      await api.saveInterviewState(matterId, { currentSection: currentSectionRef.current, savedAt: new Date().toISOString() });
     } catch (err: any) { console.error("Save error:", err); }
   };
 
